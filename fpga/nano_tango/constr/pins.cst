@@ -1,0 +1,8 @@
+// Tang Nano 20K physical constraints
+// Device: GW2AR-LV18QN88C8/I7 (GW2AR-18C)
+
+IO_LOC  "clk" 4;
+IO_PORT "clk" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+IO_LOC  "led" 15;
+IO_PORT "led" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8;
