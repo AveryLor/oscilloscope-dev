@@ -1,0 +1,34 @@
+name: Apply main ruleset
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/rulesets/main.json
+      - .github/scripts/apply-main-ruleset.sh
+      - .github/workflows/apply-main-ruleset.yml
+
+permissions:
+  contents: read
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Apply protect-main ruleset
+        env:
+          RULESET_TOKEN: ${{ secrets.RULESET_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          if [ -z "${RULESET_TOKEN}" ]; then
+            echo "error: repository secret RULESET_TOKEN is not set."
+            echo "Create a fine-grained PAT with Administration: Read and write for this repo,"
+            echo "add it as RULESET_TOKEN, then re-run this workflow."
+            exit 1
+          fi
+          chmod +x .github/scripts/apply-main-ruleset.sh
+          .github/scripts/apply-main-ruleset.sh

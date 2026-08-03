@@ -1,0 +1,2 @@
+# Minimal ESP-IDF defaults for the oscilloscope streamer.
+# Prefer idf.py menuconfig for board-specific choices.

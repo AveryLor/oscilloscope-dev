@@ -1,0 +1,40 @@
+# FPGA build outputs
+fpga/nano_tango/gowin_project/
+fpga/nano_tango/impl/
+*.fs
+
+# Generic object / binary noise
+*.bin
+*.elf
+*.map
+*.o
+*.a
+
+# Gowin EDA IDE junk
+*.gprj
+*.gprj.user
+*.rpt.html
+*.syn.rpt
+*.pnr.rpt
+temp/
+
+# ESP-IDF
+esp32/build/
+esp32/sdkconfig
+esp32/sdkconfig.old
+esp32/dependencies.lock
+esp32/managed_components/
+
+# PlatformIO (if used later)
+.pio/
+
+# Python / editors
+__pycache__/
+*.pyc
+.venv/
+venv/
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store

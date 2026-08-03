@@ -1,0 +1,23 @@
+name: Guard main
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  no-force-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reject forced updates to main
+        if: github.event.forced == true
+        run: |
+          echo "::error::Forced push to main detected. Force pushes to main are not allowed."
+          echo "Use a pull request instead. If rulesets are misconfigured, re-run Apply main ruleset."
+          exit 1
+
+      - name: Main update was not forced
+        if: github.event.forced != true
+        run: echo "Push to main was not a force push."
