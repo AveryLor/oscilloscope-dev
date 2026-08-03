@@ -1,6 +1,6 @@
 # FPGA build outputs
-fpga/nano_tango/gowin_project/
-fpga/nano_tango/impl/
+fpga/gowin_project/
+fpga/impl/
 *.fs
 
 # Generic object / binary noise

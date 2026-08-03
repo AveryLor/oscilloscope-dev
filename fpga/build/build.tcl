@@ -1,5 +1,5 @@
 # Gowin EDA build script for Tang Nano 20K (GW2AR-18C)
-# Run via: make build   (or: gw_sh build/build.tcl from fpga/nano_tango)
+# Run via: make build   (or: gw_sh build/build.tcl from fpga/)
 
 set prj_name        "nano_tango"
 set top_name        "top"
