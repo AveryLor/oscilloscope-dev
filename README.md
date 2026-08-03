@@ -11,7 +11,7 @@ FPGA + ESP32 firmware for an oscilloscope: the Tang Nano 20K buffers ADC samples
 
 | Path | Role |
 |------|------|
-| `fpga/nano_tango/` | Tang Nano 20K RTL, constraints, Gowin build |
+| `fpga/` | Tang Nano 20K RTL, constraints, Gowin build |
 | `esp32/` | ESP-IDF firmware (streamer) |
 
 ## Build
@@ -19,8 +19,8 @@ FPGA + ESP32 firmware for an oscilloscope: the Tang Nano 20K buffers ADC samples
 **FPGA** (needs [Gowin EDA](https://www.gowinsemi.com/) `gw_sh` and [openFPGALoader](https://github.com/trabucayre/openFPGALoader)):
 
 ```bash
-make -C fpga/nano_tango build
-make -C fpga/nano_tango prog
+make -C fpga/ build
+make -C fpga/ prog
 ```
 
 **ESP32** (needs [ESP-IDF](https://docs.espressif.com/projects/esp-idf/)):
