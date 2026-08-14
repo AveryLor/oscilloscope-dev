@@ -12,8 +12,10 @@ set prj_dir      [file join $project_root gowin_project]
 
 create_project -name $prj_name -dir $prj_dir -pn $device -device_version $device_version -force
 
+add_file [file join $project_root rtl adc_pll.v]
 add_file [file join $project_root rtl top.sv]
 add_file [file join $project_root constr pins.cst]
+add_file [file join $project_root constr timing.sdc]
 set_option -top_module $top_name
 set_option -verilog_std sysv2017
 

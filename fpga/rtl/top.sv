@@ -8,17 +8,33 @@
 module top (
     input  logic       clk,
     output logic       led,
-    (* syn_keep = "true" *) input  logic       adc_enc_clk,
-    (* syn_keep = "true" *) input  logic [9:0] adc_d,
-    (* syn_keep = "true" *) input  logic       adc_or,
-    (* syn_keep = "true" *) input  logic       ext_trig
+    input  logic       adc_enc_clk,
+    input  logic [9:0] adc_d,
+    input  logic       adc_or,
+    input  logic       ext_trig
 );
 
-    // Keep unused ADC/trigger inputs in the netlist so IO constraints apply.
-    // Replace with real capture / buffer logic.
-    (* syn_keep = "true" *) logic adc_keep;
-    assign adc_keep = ^{adc_enc_clk, adc_d, adc_or, ext_trig};
+    logic adc_sample_clk;
+    logic pll_lock;
 
-    assign led = 1'b0;
+    adc_pll u_adc_pll (
+        .clkin(adc_enc_clk),
+        .clkoutp(adc_sample_clk),
+        .lock(pll_lock)
+    );
+
+    (* syn_useioff = 1, syn_keep = "true" *) logic [9:0] adc_d_q;
+    (* syn_useioff = 1, syn_keep = "true" *) logic       adc_or_q;
+    (* syn_useioff = 1, syn_keep = "true" *) logic       ext_trig_q;
+
+    always_ff @(posedge adc_sample_clk) begin
+        if (pll_lock) begin
+            adc_d_q    <= adc_d;
+            adc_or_q   <= adc_or;
+            ext_trig_q <= ext_trig;
+        end
+    end
+
+    assign led = pll_lock;
 
 endmodule
