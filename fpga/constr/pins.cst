@@ -1,15 +1,13 @@
 // Tang Nano 20K physical constraints
 // Device: GW2AR-LV18QN88C8/I7 (GW2AR-18C)
+// Header numbering: schematic J6/J7 pin 1 = 3V3/GND joystick end.
 
 IO_LOC  "clk" 4;
 IO_PORT "clk" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 
-IO_LOC  "led" 15;
-IO_PORT "led" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8;
-
-// ADC / trigger inputs: 2.5V CMOS on 3.3V banks (underdrive)
-IO_LOC  "adc_enc_clk" 77;
-IO_PORT "adc_enc_clk" IO_TYPE=LVCMOS25UD33 PULL_MODE=NONE;
+// ADC / FPGA_CLK: 2.5V CMOS on 3.3V banks (underdrive)
+IO_LOC  "fpga_clk" 76;
+IO_PORT "fpga_clk" IO_TYPE=LVCMOS25UD33 PULL_MODE=NONE;
 
 IO_LOC  "adc_d[0]" 27;
 IO_PORT "adc_d[0]" IO_TYPE=LVCMOS25UD33 PULL_MODE=NONE;
@@ -44,5 +42,58 @@ IO_PORT "adc_d[9]" IO_TYPE=LVCMOS25UD33 PULL_MODE=NONE;
 IO_LOC  "adc_or" 18;
 IO_PORT "adc_or" IO_TYPE=LVCMOS25UD33 PULL_MODE=NONE;
 
-IO_LOC  "ext_trig" 85;
-IO_PORT "ext_trig" IO_TYPE=LVCMOS25UD33 PULL_MODE=NONE;
+IO_LOC  "hw_trigger" 53;
+IO_PORT "hw_trigger" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+// ESP32 SPI slave (names only; no protocol yet)
+IO_LOC  "spi_sclk" 79;
+IO_PORT "spi_sclk" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+IO_LOC  "spi_cs" 86;
+IO_PORT "spi_cs" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+IO_LOC  "spi_mosi" 72;
+IO_PORT "spi_mosi" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+IO_LOC  "spi_miso" 71;
+IO_PORT "spi_miso" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8;
+
+// Horizontal / trigger encoders (RC-filtered on the PCB)
+IO_LOC  "dial_hs_a" 16;
+IO_PORT "dial_hs_a" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+IO_LOC  "dial_hs_b" 15;
+IO_PORT "dial_hs_b" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+IO_LOC  "dial_hs_btn" 85;
+IO_PORT "dial_hs_btn" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+IO_LOC  "dial_ho_a" 75;
+IO_PORT "dial_ho_a" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+IO_LOC  "dial_ho_b" 74;
+IO_PORT "dial_ho_b" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+IO_LOC  "dial_ho_btn" 73;
+IO_PORT "dial_ho_btn" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+IO_LOC  "dial_tg_a" 49;
+IO_PORT "dial_tg_a" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+IO_LOC  "dial_tg_b" 55;
+IO_PORT "dial_tg_b" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+IO_LOC  "dial_tg_btn" 48;
+IO_PORT "dial_tg_btn" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+IO_LOC  "probe_comp" 80;
+IO_PORT "probe_comp" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8;
+
+IO_LOC  "fpga_flex[0]" 51;
+IO_PORT "fpga_flex[0]" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+IO_LOC  "fpga_flex[1]" 54;
+IO_PORT "fpga_flex[1]" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+IO_LOC  "fpga_flex[2]" 56;
+IO_PORT "fpga_flex[2]" IO_TYPE=LVCMOS33 PULL_MODE=UP;
