@@ -1,7 +1,7 @@
 // Tang Nano 20K physical constraints
 // Device: GW2AR-LV18QN88C8/I7 (GW2AR-18C)
 // Header numbering: schematic J6/J7 pin 1 = 3V3/GND joystick end.
-// J7 ADC / clock / trigger: Altium. J6 parks: not in Altium yet.
+// J7 ADC / clock / trigger: Altium. J6 firmware map (finish in Altium).
 
 IO_LOC  "clk" 4;
 IO_PORT "clk" IO_TYPE=LVCMOS33 PULL_MODE=UP;
@@ -55,7 +55,7 @@ IO_PORT "fpga_flex[1]" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 IO_LOC  "fpga_flex[2]" 52;
 IO_PORT "fpga_flex[2]" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 
-// ESP32 SPI slave — not in Altium yet (parked on unused J6)
+// J6 firmware map (finish in Altium): ESP32 SPI slave
 IO_LOC  "spi_sclk" 77;
 IO_PORT "spi_sclk" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 
@@ -68,7 +68,7 @@ IO_PORT "spi_mosi" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 IO_LOC  "spi_miso" 25;
 IO_PORT "spi_miso" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8;
 
-// Encoders — not in Altium yet (parked on unused J6)
+// J6 firmware map (finish in Altium): encoders and probe_comp
 IO_LOC  "dial_hs_a" 16;
 IO_PORT "dial_hs_a" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 
