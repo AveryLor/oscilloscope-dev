@@ -28,10 +28,8 @@ flowchart LR
 
 | Block | Role |
 |-------|------|
-| **FPGA** | 100 Msps capture (`ADC_D*` + `FPGA_CLK`), timebase/trigger knobs, probe-comp, optional J4 trigger mezzanine, SPI slave dump |
-| **ESP32** | Analog frontend (VGA, LNA DAC, relays), vertical knobs, SPI master, stream frozen captures over USB-UART |
-
-Vertical knobs stay on the ESP32 (frontend gain/offset). Horizontal and trigger knobs stay on the FPGA (capture timing). Dataflow is **freeze-mode / single-shot**: the FPGA fills a ring buffer, a trigger decides when to stop, then the ESP32 dumps the window. It is not a continuous 100 Msps pipe.
+| **FPGA** | 100 Msps capture (`ADC_D*` + `FPGA_CLK`), SPI slave dump |
+| **ESP32** | VGA, LNA DAC, relays, vertical knobs, SPI master, stream frozen captures over USB-UART |
 
 ## Pinout
 
