@@ -17,11 +17,12 @@ flowchart LR
   Clk[PL133_FPGA_CLK] --> FPGA
   EncH[HS_HO_TG_encoders] --> FPGA
   Probe[PROBE_COMP] --> FPGA
-  VGA[LMH6518_SPI] --> ESP32
+  ESP32 -->|"HSPI VGA_MOSI SDIO"| VGA[LMH6518]
   Dac[MCP4726_I2C] --> ESP32
   Relays[atten_term_coupling] --> ESP32
   EncV[VS_VO_encoders] --> ESP32
-  FPGA -->|shared_VSPI_dump| ESP32
+  ESP32 -->|"VSPI FPGA_MOSI cmds"| FPGA
+  FPGA -->|"VSPI FPGA_MISO samples"| ESP32
   ESP32 --> PC[USB_UART]
 ```
 
@@ -50,10 +51,10 @@ Vertical knobs stay on the ESP32 (frontend gain/offset). Horizontal and trigger 
 | `ADC_D9` | J6-4 | 19 | `IOL51A` / LED4 | Adjacent `IOL*` |
 | `ADC_OR` | J6-3 | 18 | `IOL49B` / LED3 | Overflow; least timing-critical, farthest from clock |
 | `FPGA_CLK` | J7-18 | 76 | `IOT30B` / `GCLKC_1` | 100 MHz from PL133 via 30 Ω (`R51`); must hit a global clock, opposite header from data |
-| `SPI_SCLK` | J7-7 | 79 | `IOT27B` / `GCLKC_0` / 2812_DIN | ESP32 is SPI master; slave clock uses the other GCLK. Leave WS2812 unused |
-| `SPI_CS` | J7-8 | 86 | `IOT4A` / HSPI_CSN | Nano HSPI chip-select silk |
-| `SPI_MOSI` | J7-4 | 72 | `IOT40B` / HSPI_DIN1 | Nano HSPI data silk |
-| `SPI_MISO` | J7-3 | 71 | `IOT44A` / HSPI_DIN0 | Nano HSPI data silk |
+| `FPGA_SPI_SCLK` | J7-7 | 79 | `IOT27B` / `GCLKC_0` / 2812_DIN | ESP32 VSPI master clock; slave uses the other GCLK. Leave WS2812 unused |
+| `FPGA_SPI_CS` | J7-8 | 86 | `IOT4A` / HSPI_CSN | VSPI CS. Nano `HSPI_*` silk is the FPGA module print, not the ESP32 HSPI controller |
+| `FPGA_SPI_MOSI` | J7-4 | 72 | `IOT40B` / HSPI_DIN1 | VSPI MOSI: ESP32 commands / dummy bytes into the FPGA slave |
+| `FPGA_SPI_MISO` | J7-3 | 71 | `IOT44A` / HSPI_DIN0 | VSPI MISO: frozen sample dump. Same Nano-silk caveat |
 | `DIAL_HS_A` | J6-14 | 16 | `IOL47B` / LED1 | Slow RC-filtered encoder; leftover J6 after ADC |
 | `DIAL_HS_B` | J6-15 | 15 | `IOL47A` / LED0 | Same; onboard LED0 constraint removed so this pin is free |
 | `DIAL_HS_BTN` | J6-17 | 85 | `IOT4B` / SDIO_D1 | Same |
@@ -74,18 +75,22 @@ Vertical knobs stay on the ESP32 (frontend gain/offset). Horizontal and trigger 
 
 ### ESP32 (NodeMCU-32S)
 
-**Shared VSPI** for the LMH6518 and the FPGA dump: one SCK/MOSI, two chip-selects, MISO is FPGA-only. VGA is write-oriented 3-wire SPI; the FPGA slave ignores clocks while `FPGA_CS` is high. A second SPI bus does not fit the remaining safe pins.
+Two SPI buses. **VSPI** (`SPI3`) is the FPGA dump only (4-wire). **HSPI** (`SPI2`) is the LMH6518 only (write-oriented 3-wire). They do not share SCLK or MOSI: the VGA datasheet caps SCLK at 10 MHz and says to stop the clock when idle, so a 15–30 MHz dump must not toggle on the analog chip. The second bus costs J5 `ESP_FLEX_1` / `ESP_FLEX_2`, which move to the vertical-offset encoder so HSPI can use its default CLK/MOSI pins. Do not short MOSI and MISO on either bus. `FPGA_MISO` never touches the VGA. GPIO12 stays unused (strapping; VGA has no MISO).
+
+Tang Nano header silk such as `HSPI_CSN` / `HSPI_DIN0` is the FPGA module print. It is not the ESP32 HSPI controller.
 
 | Net | GPIO | Silk | Why |
 |-----|------|------|-----|
 | `SDA` | 21 | P41 | Hardware I2C |
 | `SCL` | 22 | P39 | Hardware I2C |
-| `SCK` | 18 | P35 | VSPI CLK → VGA and FPGA |
-| `MOSI` | 23 | P23 | VSPI MOSI → LMH6518 SDIO and FPGA MOSI |
-| `MISO` | 19 | P19 | VSPI MISO from FPGA pass |
-| `VGA_CS` | 27 | P27 | Separate CS; not a strapping pin |
-| `FPGA_CS` | 5 | P5 | VSPI CS0, idle-high. |
-| `FPGA_IRQ` | 16 | P16 | Capture-ready; poll SPI if this pin is dropped |
+| `FPGA_SCLK` | 18 | P35 | VSPI CLK → FPGA dump only |
+| `FPGA_MOSI` | 23 | P36 | VSPI MOSI → FPGA commands / dummy bytes |
+| `FPGA_MISO` | 19 | P38 | VSPI MISO ← FPGA sample dump |
+| `FPGA_CS` | 5 | P34 | VSPI CS0, idle-high |
+| `FPGA_IRQ` | 16 | P25 | Capture-ready; poll SPI if this pin is dropped |
+| `VGA_SCLK` | 14 | P14 | HSPI CLK → LMH6518; ≤10 MHz, idle when not writing |
+| `VGA_MOSI` | 13 | P20 | HSPI MOSI → LMH6518 `SDIO` (writes only) |
+| `VGA_CS` | 27 | P16 | HSPI CS remapped here; not GPIO15 (strapping) |
 | `100X_10X` | 32 | P32 | Low-side FET drive; not an input-only GPIO |
 | `10X_1X` | 33 | P33 | Same |
 | `DC_COUP` | 25 | P25 | Same |
@@ -94,11 +99,9 @@ Vertical knobs stay on the ESP32 (frontend gain/offset). Horizontal and trigger 
 | `DIAL_VS_B` | 39 | SVN | Same |
 | `DIAL_VS_BTN` | 34 | P34 | Same |
 | `DIAL_VO_A` | 35 | P35 | Vertical-offset encoder |
-| `DIAL_VO_B` | 13 | P13 | Same |
-| `DIAL_VO_BTN` | 14 | P14 | Same |
-| `ESP_FLEX_1` | 17 | P17 | J5 future trigger |
-| `ESP_FLEX_2` | 4 | P4 | Same |
-| `ESP_FLEX_3` | 15 | P15 | Idle-high is boot-safe; do not attach a module that pulls it low at reset |
+| `DIAL_VO_B` | 17 | P17 | Was `ESP_FLEX_1`; freed HSPI MOSI |
+| `DIAL_VO_BTN` | 4 | P4 | Was `ESP_FLEX_2`; freed HSPI CLK |
+| `ESP_FLEX_3` | 15 | P15 | J5 only; idle-high is boot-safe; do not attach a module that pulls it low at reset |
 
 Reserved: `GPIO1`/`GPIO3` (USB-UART to the laptop), `GPIO6–11` (flash), `GPIO0`/`GPIO2`/`GPIO12` (strapping).
 
@@ -112,11 +115,11 @@ These 8-pin headers are a **future hardware-trigger mezzanine**, not the ADC dat
 |--------|------|
 | J3 | Analog/power: `VGA_AUX_*`, ±5 V analog |
 | J4 | FPGA: `HW_TRIGGER`, `FPGA_FLEX_1..3` |
-| J5 | ESP32: `SDA`/`SCL`, `ESP_FLEX_1..3` |
+| J5 | ESP32: `SDA`/`SCL`, `ESP_FLEX_3` only (`ESP_FLEX_1`/`ESP_FLEX_2` used for `DIAL_VO_*`) |
 
 ### Schematic vs this map
 
-`FPGA_CS`, `SPI_MISO`, and `FPGA_IRQ` are firmware nets to add on the next Altium pass. Dump SPI is freeze-mode (~15–30 Mbps), not live 100 Msps.
+`FPGA_CS`, `FPGA_MISO`, and `FPGA_IRQ` are firmware nets to add on the next Altium pass. VGA needs its own `VGA_SCLK` / `VGA_MOSI` / `VGA_CS` on that pass — do not tie them to the FPGA VSPI nets. Dump SPI is freeze-mode (~15–30 Mbps), not live 100 Msps.
 
 Other constraints:
 
