@@ -1,6 +1,7 @@
 // Tang Nano 20K physical constraints
 // Device: GW2AR-LV18QN88C8/I7 (GW2AR-18C)
 // Header numbering: schematic J6/J7 pin 1 = 3V3/GND joystick end.
+// J7 ADC / clock / trigger: Altium. J6 firmware map (finish in Altium).
 
 IO_LOC  "clk" 4;
 IO_PORT "clk" IO_TYPE=LVCMOS33 PULL_MODE=UP;
@@ -9,56 +10,65 @@ IO_PORT "clk" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 IO_LOC  "fpga_clk" 76;
 IO_PORT "fpga_clk" IO_TYPE=LVCMOS25UD33 PULL_MODE=NONE;
 
-IO_LOC  "adc_d[0]" 27;
+IO_LOC  "adc_d[0]" 80;
 IO_PORT "adc_d[0]" IO_TYPE=LVCMOS25UD33 PULL_MODE=NONE;
 
-IO_LOC  "adc_d[1]" 28;
+IO_LOC  "adc_d[1]" 42;
 IO_PORT "adc_d[1]" IO_TYPE=LVCMOS25UD33 PULL_MODE=NONE;
 
-IO_LOC  "adc_d[2]" 25;
+IO_LOC  "adc_d[2]" 41;
 IO_PORT "adc_d[2]" IO_TYPE=LVCMOS25UD33 PULL_MODE=NONE;
 
-IO_LOC  "adc_d[3]" 26;
+IO_LOC  "adc_d[3]" 56;
 IO_PORT "adc_d[3]" IO_TYPE=LVCMOS25UD33 PULL_MODE=NONE;
 
-IO_LOC  "adc_d[4]" 29;
+IO_LOC  "adc_d[4]" 54;
 IO_PORT "adc_d[4]" IO_TYPE=LVCMOS25UD33 PULL_MODE=NONE;
 
-IO_LOC  "adc_d[5]" 30;
+IO_LOC  "adc_d[5]" 51;
 IO_PORT "adc_d[5]" IO_TYPE=LVCMOS25UD33 PULL_MODE=NONE;
 
-IO_LOC  "adc_d[6]" 31;
+IO_LOC  "adc_d[6]" 48;
 IO_PORT "adc_d[6]" IO_TYPE=LVCMOS25UD33 PULL_MODE=NONE;
 
-IO_LOC  "adc_d[7]" 17;
+IO_LOC  "adc_d[7]" 55;
 IO_PORT "adc_d[7]" IO_TYPE=LVCMOS25UD33 PULL_MODE=NONE;
 
-IO_LOC  "adc_d[8]" 20;
+IO_LOC  "adc_d[8]" 49;
 IO_PORT "adc_d[8]" IO_TYPE=LVCMOS25UD33 PULL_MODE=NONE;
 
-IO_LOC  "adc_d[9]" 19;
+IO_LOC  "adc_d[9]" 86;
 IO_PORT "adc_d[9]" IO_TYPE=LVCMOS25UD33 PULL_MODE=NONE;
 
-IO_LOC  "adc_or" 18;
+IO_LOC  "adc_or" 79;
 IO_PORT "adc_or" IO_TYPE=LVCMOS25UD33 PULL_MODE=NONE;
 
-IO_LOC  "hw_trigger" 53;
+IO_LOC  "hw_trigger" 72;
 IO_PORT "hw_trigger" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 
-// ESP32 SPI slave (names only; no protocol yet)
-IO_LOC  "spi_sclk" 79;
+IO_LOC  "fpga_flex[0]" 71;
+IO_PORT "fpga_flex[0]" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+IO_LOC  "fpga_flex[1]" 53;
+IO_PORT "fpga_flex[1]" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+IO_LOC  "fpga_flex[2]" 52;
+IO_PORT "fpga_flex[2]" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+// J6 firmware map (finish in Altium): ESP32 SPI slave
+IO_LOC  "spi_sclk" 77;
 IO_PORT "spi_sclk" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 
-IO_LOC  "spi_cs" 86;
+IO_LOC  "spi_cs" 27;
 IO_PORT "spi_cs" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 
-IO_LOC  "spi_mosi" 72;
+IO_LOC  "spi_mosi" 28;
 IO_PORT "spi_mosi" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 
-IO_LOC  "spi_miso" 71;
+IO_LOC  "spi_miso" 25;
 IO_PORT "spi_miso" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8;
 
-// Horizontal / trigger encoders (RC-filtered on the PCB)
+// J6 firmware map (finish in Altium): encoders and probe_comp
 IO_LOC  "dial_hs_a" 16;
 IO_PORT "dial_hs_a" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 
@@ -77,23 +87,14 @@ IO_PORT "dial_ho_b" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 IO_LOC  "dial_ho_btn" 73;
 IO_PORT "dial_ho_btn" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 
-IO_LOC  "dial_tg_a" 49;
+IO_LOC  "dial_tg_a" 26;
 IO_PORT "dial_tg_a" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 
-IO_LOC  "dial_tg_b" 55;
+IO_LOC  "dial_tg_b" 29;
 IO_PORT "dial_tg_b" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 
-IO_LOC  "dial_tg_btn" 48;
+IO_LOC  "dial_tg_btn" 30;
 IO_PORT "dial_tg_btn" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 
-IO_LOC  "probe_comp" 80;
+IO_LOC  "probe_comp" 31;
 IO_PORT "probe_comp" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8;
-
-IO_LOC  "fpga_flex[0]" 51;
-IO_PORT "fpga_flex[0]" IO_TYPE=LVCMOS33 PULL_MODE=UP;
-
-IO_LOC  "fpga_flex[1]" 54;
-IO_PORT "fpga_flex[1]" IO_TYPE=LVCMOS33 PULL_MODE=UP;
-
-IO_LOC  "fpga_flex[2]" 56;
-IO_PORT "fpga_flex[2]" IO_TYPE=LVCMOS33 PULL_MODE=UP;

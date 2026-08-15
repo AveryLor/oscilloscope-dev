@@ -37,6 +37,8 @@ module top (
         .lock(pll_lock)
     );
 
+    // VIN+ / VIN- are swapped on the analog front end; codes are inverted
+    // around mid-scale. RTL does not correct this yet.
     (* syn_useioff = 1, syn_keep = "true" *) logic [9:0] adc_d_q;
     (* syn_useioff = 1, syn_keep = "true" *) logic       adc_or_q;
     (* syn_useioff = 1, syn_keep = "true" *) logic       hw_trigger_q;

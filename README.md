@@ -61,62 +61,48 @@ flowchart LR
 
 ### FPGA (Tang Nano 20K)
 
-| Net | J6/J7 | FPGA pin | Nano silk | Why |
-|-----|-------|----------|-----------|-----|
-| `ADC_D0` | J6-13 | 27 | `IOB8A` / LCD_B7 | Bank 5 cluster, LSB of the parallel bus |
-| `ADC_D1` | J6-12 | 28 | `IOB8B` / LCD_B6 | Consecutive with D0 |
-| `ADC_D2` | J6-11 | 25 | `IOB6A` / LCD_HS | Consecutive |
-| `ADC_D3` | J6-10 | 26 | `IOB6B` / LCD_VS | Consecutive |
-| `ADC_D4` | J6-9 | 29 | `IOB14A` / LCD_B5 | Consecutive |
-| `ADC_D5` | J6-8 | 30 | `IOB14B` / LCD_B4 | Consecutive |
-| `ADC_D6` | J6-7 | 31 | `IOB29A` / LCD_B3 | Consecutive |
-| `ADC_D7` | J6-6 | 17 | `IOL49A` / LED2 | Adjacent `IOL*` after Bank 5 runs out |
-| `ADC_D8` | J6-5 | 20 | `IOL51B` / LED5 | Adjacent `IOL*` |
-| `ADC_D9` | J6-4 | 19 | `IOL51A` / LED4 | Adjacent `IOL*` |
-| `ADC_OR` | J6-3 | 18 | `IOL49B` / LED3 | Overflow; least timing-critical, farthest from clock |
-| `FPGA_CLK` | J7-18 | 76 | `IOT30B` / `GCLKC_1` | 100 MHz from PL133 via 30 Ω (`R51`); must hit a global clock |
-| `FPGA_SPI_SCLK` | J7-7 | 79 | `IOT27B` / `GCLKC_0` / 2812_DIN | ESP32 VSPI master clock; slave uses the other GCLK. Leave WS2812 unused |
-| `FPGA_SPI_CS` | J7-8 | 86 | `IOT4A` / HSPI_CSN | VSPI CS. Nano `HSPI_*` silk is the FPGA module print, not the ESP32 HSPI controller |
-| `FPGA_SPI_MOSI` | J7-4 | 72 | `IOT40B` / HSPI_DIN1 | VSPI MOSI: ESP32 commands / dummy bytes into the FPGA slave |
-| `FPGA_SPI_MISO` | J7-3 | 71 | `IOT44A` / HSPI_DIN0 | VSPI MISO: frozen sample dump. Same Nano-silk caveat |
-| `DIAL_HS_A` | J6-14 | 16 | `IOL47B` / LED1 | Slow RC-filtered encoder; leftover J6 after ADC |
-| `DIAL_HS_B` | J6-15 | 15 | `IOL47A` / LED0 | Same; onboard LED0 constraint removed so this pin is free |
-| `DIAL_HS_BTN` | J6-17 | 85 | `IOT4B` / SDIO_D1 | Same |
-| `DIAL_HO_A` | J6-18 | 75 | `IOT34A` / HSPI_DIR | Horizontal offset encoder |
-| `DIAL_HO_B` | J6-19 | 74 | `IOT34B` / HSPI_DIN3 | Same |
-| `DIAL_HO_BTN` | J6-20 | 73 | `IOT40A` / HSPI_DIN2 | Same |
-| `DIAL_TG_A` | J7-9 | 49 | `IOR49A` / LCD_BL | Trigger knobs on the capture/SPI header |
-| `DIAL_TG_B` | J7-10 | 55 | `IOR36B` / I2S_LRCK | Same |
-| `DIAL_TG_BTN` | J7-11 | 48 | `IOR49B` / LCD_DE | Same |
-| `PROBE_COMP` | J7-17 | 80 | `IOT27A` / SDIO_D2 | FPGA cal square; schematic J8-2 |
-| `HW_TRIGGER` | J7-2 | 53 | `IOR38B` / EDID_CLK | Digital trigger in from J4; kept off the 100 MHz clock pin |
-| `FPGA_FLEX_1` | J7-12 | 51 | `IOR45A` / PA_EN | J4 future trigger module |
-| `FPGA_FLEX_2` | J7-13 | 54 | `IOR38A` / I2S_DIN | Same |
-| `FPGA_FLEX_3` | J7-14 | 56 | `IOR36A` / I2S_BCLK | Same |
-| GND | J6-1, J7-6, J7-19 | — | GND | Common ground with the ADC board |
-| 3V3 | J6-2, J7-5 | — | 3V3 | I/O rail |
-| 5V | J7-20 | — | 5V | Header 5 V only; do not back-power blindly |
-
-Reserved: `GPIO1`/`GPIO3` (USB-UART to the laptop), `GPIO6–11` (flash SPI0/1), `GPIO0`/`GPIO2`/`GPIO12` (strapping).
-
-### Trigger expansion (J3 / J4 / J5)
-
-These 8-pin headers are a **future hardware-trigger mezzanine**, not the ADC data path.
-
-| Header | Role |
-|--------|------|
-| J3 | Analog/power: `VGA_AUX_*`, ±5 V analog |
-| J4 | FPGA: `HW_TRIGGER`, `FPGA_FLEX_1..3` |
-| J5 | ESP32: `SDA`/`SCL`, `ESP_FLEX_3` only (`ESP_FLEX_1`/`ESP_FLEX_2` used for `DIAL_VO_*`) |
-
-### Schematic vs this map
-
-`FPGA_CS`, `FPGA_MISO`, and `FPGA_IRQ` are firmware nets to add on the next Altium pass. VGA needs its own `VGA_SCLK` / `VGA_MOSI` / `VGA_CS` on that pass — do not tie them to the FPGA VSPI nets. Dump SPI is freeze-mode (~15–30 Mbps), not live 100 Msps.
-
-Other constraints:
-
-- Expect **capture → freeze → SPI dump → display**, not continuous roll at full sample rate (roll/decimation can run in the FPGA at a reduced rate).
-- Deep memory and high UI refresh want a USB FIFO later; ESP32 is fine for bring-up, control plane, and modest capture depths.
+| Header | Net | FPGA pin | Nano silk | Why |
+|--------|-----|----------|-----------|-----|
+| J6-1 | GND | — | GND | Common ground |
+| J6-2 | 3V3 | — | 3V3 | I/O rail |
+| J6-3 | — | 18 | `IOL49B` / LED3 | Spare |
+| J6-4 | — | 19 | `IOL51A` / LED4 | Spare |
+| J6-5 | — | 20 | `IOL51B` / LED5 | Spare |
+| J6-6 | — | 17 | `IOL49A` / LED2 | Spare |
+| J6-7 | `PROBE_COMP` | 31 | `IOB29A` / LCD_B3 | Cal square; also J8-2 |
+| J6-8 | `DIAL_TG_BTN` | 30 | `IOB14B` / LCD_B4 | Trigger encoder button |
+| J6-9 | `DIAL_TG_B` | 29 | `IOB14A` / LCD_B5 | Trigger encoder B |
+| J6-10 | `DIAL_TG_A` | 26 | `IOB6B` / LCD_VS | Trigger encoder A |
+| J6-11 | `FPGA_SPI_MISO` | 25 | `IOB6A` / LCD_HS | VSPI MISO: frozen sample dump |
+| J6-12 | `FPGA_SPI_MOSI` | 28 | `IOB8B` / LCD_B6 | VSPI MOSI: ESP32 commands |
+| J6-13 | `FPGA_SPI_CS` | 27 | `IOB8A` / LCD_B7 | VSPI CS, idle-high |
+| J6-14 | `DIAL_HS_A` | 16 | `IOL47B` / LED1 | Horizontal scale encoder A |
+| J6-15 | `DIAL_HS_B` | 15 | `IOL47A` / LED0 | Horizontal scale encoder B |
+| J6-16 | `FPGA_SPI_SCLK` | 77 | `IOT30A` / LCD_CLK | VSPI clock (GCLK; `GCLKC_0` is `ADC_OR`) |
+| J6-17 | `DIAL_HS_BTN` | 85 | `IOT4B` / SDIO_D1 | Horizontal scale button |
+| J6-18 | `DIAL_HO_A` | 75 | `IOT34A` / HSPI_DIR | Horizontal offset encoder A |
+| J6-19 | `DIAL_HO_B` | 74 | `IOT34B` / HSPI_DIN3 | Horizontal offset encoder B |
+| J6-20 | `DIAL_HO_BTN` | 73 | `IOT40A` / HSPI_DIN2 | Horizontal offset button |
+| J7-1 | `FPGA_FLEX_3` | 52 | `IOR39A` / BL616_UART_RX | J4 trigger mezzanine |
+| J7-2 | `FPGA_FLEX_2` | 53 | `IOR38B` / EDID_CLK | J4 trigger mezzanine |
+| J7-3 | `FPGA_FLEX_1` | 71 | `IOT44A` / HSPI_DIN0 | J4 trigger mezzanine |
+| J7-4 | `HW_TRIGGER` | 72 | `IOT40B` / HSPI_DIN1 | Digital trigger in from J4 |
+| J7-5 | 3V3 | — | 3V3 | I/O rail |
+| J7-6 | GND | — | GND | Common ground |
+| J7-7 | `ADC_OR` | 79 | `IOT27B` / `GCLKC_0` / 2812_DIN | Overflow |
+| J7-8 | `ADC_D9` | 86 | `IOT4A` / HSPI_CSN | MSB of the parallel bus |
+| J7-9 | `ADC_D8` | 49 | `IOR49A` / LCD_BL | Consecutive down J7 |
+| J7-10 | `ADC_D7` | 55 | `IOR36B` / I2S_LRCK | Consecutive |
+| J7-11 | `ADC_D6` | 48 | `IOR49B` / LCD_DE | Consecutive |
+| J7-12 | `ADC_D5` | 51 | `IOR45A` / PA_EN | Consecutive |
+| J7-13 | `ADC_D4` | 54 | `IOR38A` / I2S_DIN | Consecutive |
+| J7-14 | `ADC_D3` | 56 | `IOR36A` / I2S_BCLK | Consecutive |
+| J7-15 | `ADC_D2` | 41 | `IOB43A` / LCD_R4 | Consecutive |
+| J7-16 | `ADC_D1` | 42 | `IOB42B` / LCD_R3 | Consecutive |
+| J7-17 | `ADC_D0` | 80 | `IOT27A` / SDIO_D2 | LSB |
+| J7-18 | `FPGA_CLK` | 76 | `IOT30B` / `GCLKC_1` | 100 MHz from PL133 via 30 Ω (`R51`) |
+| J7-19 | GND | — | GND | Common ground |
+| J7-20 | 5V | — | 5V | Through Schottky `D12`; do not back-power blindly |
 
 
 ## Repository layout
