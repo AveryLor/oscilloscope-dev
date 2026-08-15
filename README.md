@@ -4,56 +4,116 @@ FPGA + ESP32 firmware for an oscilloscope: the Tang Nano 20K buffers ADC samples
 
 ## Hardware
 
-- Sipeed Tang Nano 20K (GW2AR-18C)
+- Sipeed Tang Nano 20K (GW2AR-18C) — [datasheet](https://dl.sipeed.com/shareURL/TANG/Nano_20K/1_Datasheet)
 - ESP32 NodeMCU-32S (laptop link)
 
 ## System architecture
 
+Mermaid flowchart of ADC capture flow from the schematics. 
+
+```mermaid
+flowchart LR
+  ADC[AD9215_D0_D9_OR] --> FPGA
+  Clk[PL133_FPGA_CLK] --> FPGA
+  EncH[HS_HO_TG_encoders] --> FPGA
+  Probe[PROBE_COMP] --> FPGA
+  ESP32 -->|"HSPI VGA_MOSI SDIO"| VGA[LMH6518]
+  Dac[MCP4726_I2C] --> ESP32
+  Relays[atten_term_coupling] --> ESP32
+  EncV[VS_VO_encoders] --> ESP32
+  ESP32 -->|"VSPI FPGA_MOSI cmds"| FPGA
+  FPGA -->|"VSPI FPGA_MISO samples"| ESP32
+  ESP32 --> PC[USB_UART]
+```
+
 | Block | Role |
 |-------|------|
-| **FPGA** | Sample ADC at encode clock, run trigger + circular capture buffer, freeze on trigger, SPI slave readout |
-| **ESP32** | SPI master, register/control plane, stream frozen captures to the PC over USB-UART |
-
-Dataflow is **freeze-mode / single-shot**: the FPGA always fills a ring buffer; a trigger decides when to stop; the ESP32 then dumps the frozen window. It is not a continuous 100 Msps pipe to the laptop.
+| **FPGA** | 100 Msps capture (`ADC_D*` + `FPGA_CLK`), SPI slave dump |
+| **ESP32** | VGA, LNA DAC, relays, vertical knobs, SPI master, stream frozen captures over USB-UART |
 
 ## Pinout
 
-### ADC → Tang Nano 20K (left header)
+### FPGA (Tang Nano 20K)
 
-Cluster data on the left header; put encode clock on global-clock-capable pin `77` (`GCLKT_1`).
+| Net | J6/J7 | FPGA pin | Nano silk | Why |
+|-----|-------|----------|-----------|-----|
+| `ADC_D0` | J6-13 | 27 | `IOB8A` / LCD_B7 | Bank 5 cluster, LSB of the parallel bus |
+| `ADC_D1` | J6-12 | 28 | `IOB8B` / LCD_B6 | Consecutive with D0 |
+| `ADC_D2` | J6-11 | 25 | `IOB6A` / LCD_HS | Consecutive |
+| `ADC_D3` | J6-10 | 26 | `IOB6B` / LCD_VS | Consecutive |
+| `ADC_D4` | J6-9 | 29 | `IOB14A` / LCD_B5 | Consecutive |
+| `ADC_D5` | J6-8 | 30 | `IOB14B` / LCD_B4 | Consecutive |
+| `ADC_D6` | J6-7 | 31 | `IOB29A` / LCD_B3 | Consecutive |
+| `ADC_D7` | J6-6 | 17 | `IOL49A` / LED2 | Adjacent `IOL*` after Bank 5 runs out |
+| `ADC_D8` | J6-5 | 20 | `IOL51B` / LED5 | Adjacent `IOL*` |
+| `ADC_D9` | J6-4 | 19 | `IOL51A` / LED4 | Adjacent `IOL*` |
+| `ADC_OR` | J6-3 | 18 | `IOL49B` / LED3 | Overflow; least timing-critical, farthest from clock |
+| `FPGA_CLK` | J7-18 | 76 | `IOT30B` / `GCLKC_1` | 100 MHz from PL133 via 30 Ω (`R51`); must hit a global clock |
+| `FPGA_SPI_SCLK` | J7-7 | 79 | `IOT27B` / `GCLKC_0` / 2812_DIN | ESP32 VSPI master clock; slave uses the other GCLK. Leave WS2812 unused |
+| `FPGA_SPI_CS` | J7-8 | 86 | `IOT4A` / HSPI_CSN | VSPI CS. Nano `HSPI_*` silk is the FPGA module print, not the ESP32 HSPI controller |
+| `FPGA_SPI_MOSI` | J7-4 | 72 | `IOT40B` / HSPI_DIN1 | VSPI MOSI: ESP32 commands / dummy bytes into the FPGA slave |
+| `FPGA_SPI_MISO` | J7-3 | 71 | `IOT44A` / HSPI_DIN0 | VSPI MISO: frozen sample dump. Same Nano-silk caveat |
+| `DIAL_HS_A` | J6-14 | 16 | `IOL47B` / LED1 | Slow RC-filtered encoder; leftover J6 after ADC |
+| `DIAL_HS_B` | J6-15 | 15 | `IOL47A` / LED0 | Same; onboard LED0 constraint removed so this pin is free |
+| `DIAL_HS_BTN` | J6-17 | 85 | `IOT4B` / SDIO_D1 | Same |
+| `DIAL_HO_A` | J6-18 | 75 | `IOT34A` / HSPI_DIR | Horizontal offset encoder |
+| `DIAL_HO_B` | J6-19 | 74 | `IOT34B` / HSPI_DIN3 | Same |
+| `DIAL_HO_BTN` | J6-20 | 73 | `IOT40A` / HSPI_DIN2 | Same |
+| `DIAL_TG_A` | J7-9 | 49 | `IOR49A` / LCD_BL | Trigger knobs on the capture/SPI header |
+| `DIAL_TG_B` | J7-10 | 55 | `IOR36B` / I2S_LRCK | Same |
+| `DIAL_TG_BTN` | J7-11 | 48 | `IOR49B` / LCD_DE | Same |
+| `PROBE_COMP` | J7-17 | 80 | `IOT27A` / SDIO_D2 | FPGA cal square; schematic J8-2 |
+| `HW_TRIGGER` | J7-2 | 53 | `IOR38B` / EDID_CLK | Digital trigger in from J4; kept off the 100 MHz clock pin |
+| `FPGA_FLEX_1` | J7-12 | 51 | `IOR45A` / PA_EN | J4 future trigger module |
+| `FPGA_FLEX_2` | J7-13 | 54 | `IOR38A` / I2S_DIN | Same |
+| `FPGA_FLEX_3` | J7-14 | 56 | `IOR36A` / I2S_BCLK | Same |
+| GND | J6-1, J7-6, J7-19 | — | GND | Common ground with the ADC board |
+| 3V3 | J6-2, J7-5 | — | 3V3 | I/O rail |
+| 5V | J7-20 | — | 5V | Header 5 V only; do not back-power blindly |
 
-| Signal | Nano header | FPGA pin | Notes |
-|--------|-------------|----------|-------|
-| `ADC_ENC_CLK` | Left 5 | 77 | GCLK; clocking / termination priority |
-| `ADC_D0` | Left 8 | 27 | |
-| `ADC_D1` | Left 9 | 28 | |
-| `ADC_D2` | Left 10 | 25 | |
-| `ADC_D3` | Left 11 | 26 | |
-| `ADC_D4` | Left 12 | 29 | |
-| `ADC_D5` | Left 13 | 30 | |
-| `ADC_D6` | Left 14 | 31 | |
-| `ADC_D7` | Left 15 | 17  |
-| `ADC_D8` | Left 16 | 20 | LED5 silk |
-| `ADC_D9` | Left 17 | 19 | LED4 silk |
-| `ADC_OR` | Left 18 | 18 | LED3 silk |
-| `EXT_TRIG` | Left 4 | 85 | External hardware trigger input |
-| GND | Left 20, Right 2, Right 15 | — | Extra GND returns to the ADC board |
+### ESP32 (NodeMCU-32S)
 
-Signal integrity on the ADC header: series ~22–33 Ω at the ADC data drivers, many GND returns interleaved with data, short stack headers preferred over ribbon.
+| Net | GPIO | Pin | Why |
+|-----|------|------|-----|
+| `SDA` | 21 | P42 | Hardware I2C (`VSPIHD` unused) |
+| `SCL` | 22 | P39 | Hardware I2C (`VSPIWP` unused) |
+| `FPGA_SCLK` | 18 | P35 | `VSPICLK` → FPGA dump only |
+| `FPGA_MOSI` | 23 | P36 | `VSPID` → FPGA commands |
+| `FPGA_MISO` | 19 | P38 | `VSPIQ` ← FPGA sample dump |
+| `FPGA_CS` | 5 | P34 | `VSPICS0`, idle-high |
+| `FPGA_IRQ` | 16 | P25 | Capture-ready; poll SPI if this pin is dropped |
+| `VGA_SCLK` | 14 | P17 | SPI Clk for control of the `LMH6518SQ` |
+| `VGA_MOSI` | 13 | P20 | MOSI control for the `LMH6518SQ` |
+| `VGA_CS` | 15 | P21 | Chip select for the `LMH6518SQ` |
+| `100X_10X` | 32 | P12 |  |
+| `10X_1X` | 33 | P13 | Same |
+| `DC_COUP` | 25 | P14 | Same |
+| `50_OHM_TERM` | 26 | P15 |  |
+| `DIAL_VS_A` | 36 | P5 |  |
+| `DIAL_VS_B` | 39 | P8 |  |
+| `DIAL_VS_BTN` | 34 | P10 |  |
+| `DIAL_VO_A` | 35 | P11 |  |
+| `DIAL_VO_B` | 17 | P27 |  |
+| `DIAL_VO_BTN` | 4 | P24 |  |
+| `ESP_FLEX_3` | 27 | P16 |  |
 
-### ESP32 ↔ FPGA (SPI + handshake, right header)
+Reserved: `GPIO1`/`GPIO3` (USB-UART to the laptop), `GPIO6–11` (flash SPI0/1), `GPIO0`/`GPIO2`/`GPIO12` (strapping).
 
-ESP32 is SPI master (VSPI); FPGA is SPI slave. Prefer SPI over I2C for capture readout.
+Relays and VGA stay on the ESP32 because they are analog-frontend control, not the 100 Msps bus.
 
-| Signal | ESP32 GPIO | NodeMCU silk | Nano header | FPGA pin | Dir |
-|--------|------------|--------------|-------------|----------|-----|
-| `SPI_SCLK` | 18 | P18 | Right 3 | 76 | ESP → FPGA |
-| `SPI_MOSI` | 23 | P23 | Right 17 | 72 | ESP → FPGA |
-| `SPI_MISO` | 19 | P19 | Right 18 | 71 | FPGA → ESP |
-| `SPI_CS` | 5 | P5 | Right 13 | 86 | ESP → FPGA |
-| `FPGA_IRQ` | 16 | P16 | Right 19 | 53 | FPGA → ESP (capture ready) |
-| `FPGA_RST` | 17 | P17 | Right 20 | 52 | ESP → FPGA (soft reset / re-arm) |
-| GND | any GND | GND | Right 2 / 15 | — | Common ground required |
+### Trigger expansion (J3 / J4 / J5)
+
+These 8-pin headers are a **future hardware-trigger mezzanine**, not the ADC data path.
+
+| Header | Role |
+|--------|------|
+| J3 | Analog/power: `VGA_AUX_*`, ±5 V analog |
+| J4 | FPGA: `HW_TRIGGER`, `FPGA_FLEX_1..3` |
+| J5 | ESP32: `SDA`/`SCL`, `ESP_FLEX_3` only (`ESP_FLEX_1`/`ESP_FLEX_2` used for `DIAL_VO_*`) |
+
+### Schematic vs this map
+
+`FPGA_CS`, `FPGA_MISO`, and `FPGA_IRQ` are firmware nets to add on the next Altium pass. VGA needs its own `VGA_SCLK` / `VGA_MOSI` / `VGA_CS` on that pass — do not tie them to the FPGA VSPI nets. Dump SPI is freeze-mode (~15–30 Mbps), not live 100 Msps.
 
 Other constraints:
 
