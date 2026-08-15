@@ -48,8 +48,8 @@ flowchart LR
 | `VGA_MOSI` | 13 | P20 | MOSI control for the `LMH6518SQ` |
 | `VGA_CS` | 15 | P21 | Chip select for the `LMH6518SQ` |
 | `100X_10X` | 32 | P12 |  |
-| `10X_1X` | 33 | P13 | Same |
-| `DC_COUP` | 25 | P14 | Same |
+| `10X_1X` | 33 | P13 |  |
+| `DC_COUP` | 25 | P14 |  |
 | `50_OHM_TERM` | 26 | P15 |  |
 | `DIAL_VS_A` | 36 | P5 |  |
 | `DIAL_VS_B` | 39 | P8 |  |
