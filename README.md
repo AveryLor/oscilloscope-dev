@@ -50,7 +50,7 @@ Vertical knobs stay on the ESP32 (frontend gain/offset). Horizontal and trigger 
 | `ADC_D8` | J6-5 | 20 | `IOL51B` / LED5 | Adjacent `IOL*` |
 | `ADC_D9` | J6-4 | 19 | `IOL51A` / LED4 | Adjacent `IOL*` |
 | `ADC_OR` | J6-3 | 18 | `IOL49B` / LED3 | Overflow; least timing-critical, farthest from clock |
-| `FPGA_CLK` | J7-18 | 76 | `IOT30B` / `GCLKC_1` | 100 MHz from PL133 via 30 Ω (`R51`); must hit a global clock, opposite header from data |
+| `FPGA_CLK` | J7-18 | 76 | `IOT30B` / `GCLKC_1` | 100 MHz from PL133 via 30 Ω (`R51`); must hit a global clock |
 | `FPGA_SPI_SCLK` | J7-7 | 79 | `IOT27B` / `GCLKC_0` / 2812_DIN | ESP32 VSPI master clock; slave uses the other GCLK. Leave WS2812 unused |
 | `FPGA_SPI_CS` | J7-8 | 86 | `IOT4A` / HSPI_CSN | VSPI CS. Nano `HSPI_*` silk is the FPGA module print, not the ESP32 HSPI controller |
 | `FPGA_SPI_MOSI` | J7-4 | 72 | `IOT40B` / HSPI_DIN1 | VSPI MOSI: ESP32 commands / dummy bytes into the FPGA slave |
@@ -75,35 +75,31 @@ Vertical knobs stay on the ESP32 (frontend gain/offset). Horizontal and trigger 
 
 ### ESP32 (NodeMCU-32S)
 
-Two SPI buses. **VSPI** (`SPI3`) is the FPGA dump only (4-wire). **HSPI** (`SPI2`) is the LMH6518 only (write-oriented 3-wire). They do not share SCLK or MOSI: the VGA datasheet caps SCLK at 10 MHz and says to stop the clock when idle, so a 15–30 MHz dump must not toggle on the analog chip. The second bus costs J5 `ESP_FLEX_1` / `ESP_FLEX_2`, which move to the vertical-offset encoder so HSPI can use its default CLK/MOSI pins. Do not short MOSI and MISO on either bus. `FPGA_MISO` never touches the VGA. GPIO12 stays unused (strapping; VGA has no MISO).
-
-Tang Nano header silk such as `HSPI_CSN` / `HSPI_DIN0` is the FPGA module print. It is not the ESP32 HSPI controller.
-
-| Net | GPIO | Silk | Why |
+| Net | GPIO | Pin | Why |
 |-----|------|------|-----|
-| `SDA` | 21 | P41 | Hardware I2C |
-| `SCL` | 22 | P39 | Hardware I2C |
-| `FPGA_SCLK` | 18 | P35 | VSPI CLK → FPGA dump only |
-| `FPGA_MOSI` | 23 | P36 | VSPI MOSI → FPGA commands / dummy bytes |
-| `FPGA_MISO` | 19 | P38 | VSPI MISO ← FPGA sample dump |
-| `FPGA_CS` | 5 | P34 | VSPI CS0, idle-high |
+| `SDA` | 21 | P42 | Hardware I2C (`VSPIHD` unused) |
+| `SCL` | 22 | P39 | Hardware I2C (`VSPIWP` unused) |
+| `FPGA_SCLK` | 18 | P35 | `VSPICLK` → FPGA dump only |
+| `FPGA_MOSI` | 23 | P36 | `VSPID` → FPGA commands |
+| `FPGA_MISO` | 19 | P38 | `VSPIQ` ← FPGA sample dump |
+| `FPGA_CS` | 5 | P34 | `VSPICS0`, idle-high |
 | `FPGA_IRQ` | 16 | P25 | Capture-ready; poll SPI if this pin is dropped |
-| `VGA_SCLK` | 14 | P14 | HSPI CLK → LMH6518; ≤10 MHz, idle when not writing |
-| `VGA_MOSI` | 13 | P20 | HSPI MOSI → LMH6518 `SDIO` (writes only) |
-| `VGA_CS` | 27 | P16 | HSPI CS remapped here; not GPIO15 (strapping) |
-| `100X_10X` | 32 | P32 | Low-side FET drive; not an input-only GPIO |
-| `10X_1X` | 33 | P33 | Same |
-| `DC_COUP` | 25 | P25 | Same |
-| `50_OHM_TERM` | 26 | P26 | Same |
-| `DIAL_VS_A` | 36 | SVP | Input-only; RC-filtered vertical-scale encoder |
-| `DIAL_VS_B` | 39 | SVN | Same |
-| `DIAL_VS_BTN` | 34 | P34 | Same |
-| `DIAL_VO_A` | 35 | P35 | Vertical-offset encoder |
-| `DIAL_VO_B` | 17 | P17 | Was `ESP_FLEX_1`; freed HSPI MOSI |
-| `DIAL_VO_BTN` | 4 | P4 | Was `ESP_FLEX_2`; freed HSPI CLK |
-| `ESP_FLEX_3` | 15 | P15 | J5 only; idle-high is boot-safe; do not attach a module that pulls it low at reset |
+| `VGA_SCLK` | 14 | P17 | SPI Clk for control of the `LMH6518SQ` |
+| `VGA_MOSI` | 13 | P20 | MOSI control for the `LMH6518SQ` |
+| `VGA_CS` | 15 | P21 | Chip select for the `LMH6518SQ` |
+| `100X_10X` | 32 | P12 |  |
+| `10X_1X` | 33 | P13 | Same |
+| `DC_COUP` | 25 | P14 | Same |
+| `50_OHM_TERM` | 26 | P15 |  |
+| `DIAL_VS_A` | 36 | P5 |  |
+| `DIAL_VS_B` | 39 | P8 |  |
+| `DIAL_VS_BTN` | 34 | P10 |  |
+| `DIAL_VO_A` | 35 | P11 |  |
+| `DIAL_VO_B` | 17 | P27 |  |
+| `DIAL_VO_BTN` | 4 | P24 |  |
+| `ESP_FLEX_3` | 27 | P16 |  |
 
-Reserved: `GPIO1`/`GPIO3` (USB-UART to the laptop), `GPIO6–11` (flash), `GPIO0`/`GPIO2`/`GPIO12` (strapping).
+Reserved: `GPIO1`/`GPIO3` (USB-UART to the laptop), `GPIO6–11` (flash SPI0/1), `GPIO0`/`GPIO2`/`GPIO12` (strapping).
 
 Relays and VGA stay on the ESP32 because they are analog-frontend control, not the 100 Msps bus.
 
