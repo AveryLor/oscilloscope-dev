@@ -82,15 +82,10 @@ flowchart LR
 | `ADC_D0` | J7-17 | 80 | `IOT27A` / SDIO_D2 | LSB |
 | `FPGA_CLK` | J7-18 | 76 | `IOT30B` / `GCLKC_1` | 100 MHz from PL133 via 30 Ω (`R51`); must hit a global clock |
 | 5V | J7-20 | — | 5V | Through Schottky `D12`; do not back-power blindly |
-| `PROBE_COMP` | J8-2 | — | — | Cal square on the probe header. FPGA ball not wired yet |
-
-VIN+ / VIN− are swapped on the analog front end for layout. Digital codes are inverted around mid-scale; RTL does not correct this yet.
 
 Reserved: `GPIO1`/`GPIO3` (USB-UART to the laptop), `GPIO6–11` (flash SPI0/1), `GPIO0`/`GPIO2`/`GPIO12` (strapping).
 
-### J6 — header present, nets not assigned
-
-Silk and FPGA balls only. Do not treat leftover firmware names as schematic nets.
+### J6
 
 | J6 | FPGA pin | Nano silk |
 |----|----------|-----------|
