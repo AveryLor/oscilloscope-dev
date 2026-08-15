@@ -28,10 +28,36 @@ flowchart LR
 
 | Block | Role |
 |-------|------|
-| **FPGA** | 100 Msps capture (`ADC_D*` + `FPGA_CLK`), SPI slave dump |
 | **ESP32** | VGA, LNA DAC, relays, vertical knobs, SPI master, stream frozen captures over USB-UART |
+| **FPGA** | 100 Msps capture (`ADC_D*` + `FPGA_CLK`), SPI slave dump |
 
 ## Pinout
+
+### ESP32 (NodeMCU-32S)
+
+| Net | GPIO | Pin | Why |
+|-----|------|------|-----|
+| `SDA` | 21 | P42 | Hardware I2C (`VSPIHD` unused) |
+| `SCL` | 22 | P39 | Hardware I2C (`VSPIWP` unused) |
+| `FPGA_SCLK` | 18 | P35 | `VSPICLK` → FPGA dump only |
+| `FPGA_MOSI` | 23 | P36 | `VSPID` → FPGA commands |
+| `FPGA_MISO` | 19 | P38 | `VSPIQ` ← FPGA sample dump |
+| `FPGA_CS` | 5 | P34 | `VSPICS0`, idle-high |
+| `FPGA_IRQ` | 16 | P25 | Capture-ready; poll SPI if this pin is dropped |
+| `VGA_SCLK` | 14 | P17 | SPI Clk for control of the `LMH6518SQ` |
+| `VGA_MOSI` | 13 | P20 | MOSI control for the `LMH6518SQ` |
+| `VGA_CS` | 15 | P21 | Chip select for the `LMH6518SQ` |
+| `100X_10X` | 32 | P12 |  |
+| `10X_1X` | 33 | P13 |  |
+| `DC_COUP` | 25 | P14 |  |
+| `50_OHM_TERM` | 26 | P15 |  |
+| `DIAL_VS_A` | 36 | P5 |  |
+| `DIAL_VS_B` | 39 | P8 |  |
+| `DIAL_VS_BTN` | 34 | P10 |  |
+| `DIAL_VO_A` | 35 | P11 |  |
+| `DIAL_VO_B` | 17 | P27 |  |
+| `DIAL_VO_BTN` | 4 | P24 |  |
+| `ESP_FLEX_3` | 27 | P16 |  |
 
 ### FPGA (Tang Nano 20K)
 
@@ -71,35 +97,7 @@ flowchart LR
 | 3V3 | J6-2, J7-5 | — | 3V3 | I/O rail |
 | 5V | J7-20 | — | 5V | Header 5 V only; do not back-power blindly |
 
-### ESP32 (NodeMCU-32S)
-
-| Net | GPIO | Pin | Why |
-|-----|------|------|-----|
-| `SDA` | 21 | P42 | Hardware I2C (`VSPIHD` unused) |
-| `SCL` | 22 | P39 | Hardware I2C (`VSPIWP` unused) |
-| `FPGA_SCLK` | 18 | P35 | `VSPICLK` → FPGA dump only |
-| `FPGA_MOSI` | 23 | P36 | `VSPID` → FPGA commands |
-| `FPGA_MISO` | 19 | P38 | `VSPIQ` ← FPGA sample dump |
-| `FPGA_CS` | 5 | P34 | `VSPICS0`, idle-high |
-| `FPGA_IRQ` | 16 | P25 | Capture-ready; poll SPI if this pin is dropped |
-| `VGA_SCLK` | 14 | P17 | SPI Clk for control of the `LMH6518SQ` |
-| `VGA_MOSI` | 13 | P20 | MOSI control for the `LMH6518SQ` |
-| `VGA_CS` | 15 | P21 | Chip select for the `LMH6518SQ` |
-| `100X_10X` | 32 | P12 |  |
-| `10X_1X` | 33 | P13 | Same |
-| `DC_COUP` | 25 | P14 | Same |
-| `50_OHM_TERM` | 26 | P15 |  |
-| `DIAL_VS_A` | 36 | P5 |  |
-| `DIAL_VS_B` | 39 | P8 |  |
-| `DIAL_VS_BTN` | 34 | P10 |  |
-| `DIAL_VO_A` | 35 | P11 |  |
-| `DIAL_VO_B` | 17 | P27 |  |
-| `DIAL_VO_BTN` | 4 | P24 |  |
-| `ESP_FLEX_3` | 27 | P16 |  |
-
 Reserved: `GPIO1`/`GPIO3` (USB-UART to the laptop), `GPIO6–11` (flash SPI0/1), `GPIO0`/`GPIO2`/`GPIO12` (strapping).
-
-Relays and VGA stay on the ESP32 because they are analog-frontend control, not the 100 Msps bus.
 
 ### Trigger expansion (J3 / J4 / J5)
 
