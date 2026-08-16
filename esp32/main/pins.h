@@ -15,7 +15,10 @@
 #define PIN_FPGA_MOSI 23 /* P23 VSPID */
 #define PIN_FPGA_MISO 19 /* P19 VSPIQ; not on Altium yet */
 #define PIN_FPGA_CS   5  /* P5  VSPICS0 */
-#define PIN_FPGA_IRQ  16 /* P16; capture-ready; not on Altium yet */
+/* Capture-ready from FPGA J6-6. Active-high, idle low: configure with an
+ * internal pull-down and a posedge interrupt so an unprogrammed FPGA
+ * (high-Z pins) reads as not-asserted rather than firing spuriously. */
+#define PIN_FPGA_IRQ  16 /* P16 */
 
 /* HSPI (SPI2) IOMUX defaults: LMH6518 VGA only (write-oriented 3-wire).
  * GPIO12 HSPIQ unused (strapping). GPIO6–11 are flash SPI0/1. */
