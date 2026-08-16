@@ -5,7 +5,7 @@ FPGA + ESP32 firmware for an oscilloscope: the Tang Nano 20K buffers ADC samples
 ## Hardware
 
 - Sipeed Tang Nano 20K (GW2AR-18C) — [datasheet](https://dl.sipeed.com/shareURL/TANG/Nano_20K/1_Datasheet)
-- ESP32 NodeMCU-32S (laptop link)
+- ESP32 DevKit V1 (Elegoo, ESP-WROOM-32) (laptop link)
 
 ## System architecture
 
@@ -33,31 +33,31 @@ flowchart LR
 
 ## Pinout
 
-### ESP32 (NodeMCU-32S)
+### ESP32 (DevKit V1, Elegoo ESP-WROOM-32)
 
-| Net | GPIO | Pin | Why |
+| Net | GPIO | Silk Screen | Why |
 |-----|------|------|-----|
-| `SDA` | 21 | P42 | Hardware I2C (`VSPIHD` unused) |
-| `SCL` | 22 | P39 | Hardware I2C (`VSPIWP` unused) |
-| `FPGA_SCLK` | 18 | P35 | `VSPICLK` → FPGA dump only |
-| `FPGA_MOSI` | 23 | P36 | `VSPID` → FPGA commands |
-| `FPGA_MISO` | 19 | P38 | `VSPIQ` ← FPGA sample dump |
-| `FPGA_CS` | 5 | P34 | `VSPICS0`, idle-high |
-| `FPGA_IRQ` | 16 | P25 | Capture-ready; poll SPI if this pin is dropped |
-| `VGA_SCLK` | 14 | P17 | SPI Clk for control of the `LMH6518SQ` |
-| `VGA_MOSI` | 13 | P20 | MOSI control for the `LMH6518SQ` |
-| `VGA_CS` | 15 | P21 | Chip select for the `LMH6518SQ` |
-| `100X_10X` | 32 | P12 |  |
-| `10X_1X` | 33 | P13 |  |
-| `DC_COUP` | 25 | P14 |  |
-| `50_OHM_TERM` | 26 | P15 |  |
-| `DIAL_VS_A` | 36 | P5 |  |
-| `DIAL_VS_B` | 39 | P8 |  |
-| `DIAL_VS_BTN` | 34 | P10 |  |
-| `DIAL_VO_A` | 35 | P11 |  |
-| `DIAL_VO_B` | 17 | P27 |  |
-| `DIAL_VO_BTN` | 4 | P24 |  |
-| `ESP_FLEX_3` | 27 | P16 |  |
+| `SDA` | 21 | D21 | Hardware I2C (`VSPIHD` unused) |
+| `SCL` | 22 | D22 | Hardware I2C (`VSPIWP` unused) |
+| `FPGA_SCLK` | 18 | D18 | `VSPICLK` → FPGA dump only |
+| `FPGA_MOSI` | 23 | D23 | `VSPID` → FPGA commands |
+| `FPGA_MISO` | 19 | D19 | `VSPIQ` ← FPGA sample dump |
+| `FPGA_CS` | 5 | D5 | `VSPICS0`, idle-high |
+| `FPGA_IRQ` | 16 | RX2 | Capture-ready; poll SPI if this pin is dropped |
+| `VGA_SCLK` | 14 | D14 | SPI Clk for control of the `LMH6518SQ` |
+| `VGA_MOSI` | 13 | D13 | MOSI control for the `LMH6518SQ` |
+| `VGA_CS` | 15 | D15 | Chip select for the `LMH6518SQ` |
+| `100X_10X` | 32 | D32 |  |
+| `10X_1X` | 33 | D33 |  |
+| `DC_COUP` | 25 | D25 |  |
+| `50_OHM_TERM` | 26 | D26 |  |
+| `DIAL_VS_A` | 36 | VP |  |
+| `DIAL_VS_B` | 39 | VN |  |
+| `DIAL_VS_BTN` | 34 | D34 |  |
+| `DIAL_VO_A` | 35 | D35 |  |
+| `DIAL_VO_B` | 17 | TX2 |  |
+| `DIAL_VO_BTN` | 4 | D4 |  |
+| `ESP_FLEX_3` | 27 | D27 |  |
 
 ### FPGA (Tang Nano 20K)
 
