@@ -1,8 +1,9 @@
 #pragma once
 
 /*
- * NodeMCU-32S GPIO map (Oscilloscope Rev 1.0).
- * Silk / alt-functions from Ai-Thinker Table 2. Names only — no drivers yet.
+ * ESP32 DevKit V1 (Elegoo, ESP-WROOM-32) GPIO map (Oscilloscope Rev 1.0).
+ * Same GPIOs as the prior NodeMCU-32S map — see README.md for the
+ * DevKit V1 silkscreen labels. Names only — no drivers yet.
  */
 
 /* Hardware I2C: MCP4726 + trigger header J5 (VSPIHD / VSPIWP unused) */
