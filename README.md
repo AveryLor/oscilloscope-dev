@@ -29,7 +29,7 @@ flowchart LR
 | Block | Role |
 |-------|------|
 | **ESP32** | VGA, LNA DAC, relays, vertical knobs, SPI master, stream frozen captures over USB-UART |
-| **FPGA** | 100 Msps capture (`ADC_D*` + `FPGA_CLK`), SPI slave dump |
+| **FPGA** | 105 Msps capture (`ADC_D*` + `FPGA_CLK`), SPI slave dump |
 
 ## Pinout
 
@@ -43,7 +43,7 @@ flowchart LR
 | `FPGA_MOSI` | 23 | D23 | `VSPID` → FPGA commands |
 | `FPGA_MISO` | 19 | D19 | `VSPIQ` ← FPGA sample dump |
 | `FPGA_CS` | 5 | D5 | `VSPICS0`, idle-high |
-| `FPGA_IRQ` | 16 | RX2 | Capture-ready; poll SPI if this pin is dropped |
+| `FPGA_IRQ` | 16 | RX2 | Capture-ready from FPGA J6-6; active-high, needs internal pull-down |
 | `VGA_SCLK` | 14 | D14 | SPI Clk for control of the `LMH6518SQ` |
 | `VGA_MOSI` | 13 | D13 | MOSI control for the `LMH6518SQ` |
 | `VGA_CS` | 15 | D15 | Chip select for the `LMH6518SQ` |
@@ -68,7 +68,7 @@ flowchart LR
 | J6-3 | — | 18 | `IOL49B` / LED3 | Spare |
 | J6-4 | — | 19 | `IOL51A` / LED4 | Spare |
 | J6-5 | — | 20 | `IOL51B` / LED5 | Spare |
-| J6-6 | — | 17 | `IOL49A` / LED2 | Spare |
+| J6-6 | `FPGA_IRQ` | 17 | `IOL49A` / LED2 | Capture-ready → ESP32; active-high, idle low |
 | J6-7 | `PROBE_COMP` | 31 | `IOB29A` / LCD_B3 | Cal square; also J8-2 |
 | J6-8 | `DIAL_TG_BTN` | 30 | `IOB14B` / LCD_B4 | Trigger encoder button |
 | J6-9 | `DIAL_TG_B` | 29 | `IOB14A` / LCD_B5 | Trigger encoder B |
@@ -100,7 +100,7 @@ flowchart LR
 | J7-15 | `ADC_D2` | 41 | `IOB43A` / LCD_R4 | Consecutive |
 | J7-16 | `ADC_D1` | 42 | `IOB42B` / LCD_R3 | Consecutive |
 | J7-17 | `ADC_D0` | 80 | `IOT27A` / SDIO_D2 | LSB |
-| J7-18 | `FPGA_CLK` | 76 | `IOT30B` / `GCLKC_1` | 100 MHz from PL133 via 30 Ω (`R51`) |
+| J7-18 | `FPGA_CLK` | 76 | `IOT30B` / `GCLKC_1` | 105 MHz from PL133 via 30 Ω (`R51`) |
 | J7-19 | GND | — | GND | Common ground |
 | J7-20 | 5V | — | 5V | Through Schottky `D12`; do not back-power blindly |
 

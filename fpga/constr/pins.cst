@@ -68,6 +68,12 @@ IO_PORT "spi_mosi" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 IO_LOC  "spi_miso" 25;
 IO_PORT "spi_miso" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8;
 
+// Capture-ready to ESP32 GPIO16. Active-high, idle low, so an unprogrammed or
+// disconnected FPGA reads as "not asserted" against the ESP32 pull-down.
+// J6-6 is the spare nearest the J6-11/12/13/16 SPI cluster. Shares LED2.
+IO_LOC  "fpga_irq" 17;
+IO_PORT "fpga_irq" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+
 // J6 firmware map (finish in Altium): encoders and probe_comp
 IO_LOC  "dial_hs_a" 16;
 IO_PORT "dial_hs_a" IO_TYPE=LVCMOS33 PULL_MODE=UP;

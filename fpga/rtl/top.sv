@@ -15,6 +15,7 @@ module top (
     input  logic       spi_cs,
     input  logic       spi_mosi,
     output logic       spi_miso,
+    output logic       fpga_irq,
     input  logic       dial_hs_a,
     input  logic       dial_hs_b,
     input  logic       dial_hs_btn,
@@ -43,16 +44,26 @@ module top (
     (* syn_useioff = 1, syn_keep = "true" *) logic       adc_or_q;
     (* syn_useioff = 1, syn_keep = "true" *) logic       hw_trigger_q;
 
+    // Unconditional so these stay packed in IOLOGIC — a pll_lock enable here
+    // would put a clock enable on the pad registers. Gate the capture-buffer
+    // write with pll_lock downstream instead.
     always_ff @(posedge adc_sample_clk) begin
-        if (pll_lock) begin
-            adc_d_q      <= adc_d;
-            adc_or_q     <= adc_or;
-            hw_trigger_q <= hw_trigger;
-        end
+        adc_d_q      <= adc_d;
+        adc_or_q     <= adc_or;
+        hw_trigger_q <= hw_trigger;
+    end
+
+    // hw_trigger is asynchronous to adc_sample_clk. hw_trigger_q is the pad
+    // stage; downstream logic must use hw_trigger_sync, not hw_trigger_q.
+    (* syn_keep = "true" *) logic hw_trigger_sync;
+
+    always_ff @(posedge adc_sample_clk) begin
+        hw_trigger_sync <= hw_trigger_q;
     end
 
     // Declared for pinout only; no SPI / encoder / probe-comp logic yet.
     assign spi_miso   = 1'b0;
     assign probe_comp = 1'b0;
+    assign fpga_irq   = 1'b0; // capture-ready, active-high (idle low)
 
 endmodule
