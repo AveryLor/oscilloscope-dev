@@ -39,14 +39,14 @@ extern "C" {
 #define MCP4726_CODE_MAX     0x0FFF
 #define MCP4726_CODE_MID     0x0800
 
-/* byte 0 bits 4..3 — reference source for "write volatile config" */
+// byte 0 bits 4..3 — reference source for "write volatile config" 
 typedef enum {
-    MCP4726_VREF_VDD           = 0, /* VDD, unbuffered (gain bit ignored) */
+    MCP4726_VREF_VDD           = 0, // VDD, unbuffered (gain bit ignored) 
     MCP4726_VREF_PIN_UNBUFFERED = 2,
     MCP4726_VREF_PIN_BUFFERED   = 3,
 } mcp4726_vref_t;
 
-/* byte 0 bit 0 — output gain, only meaningful when VREF != VDD */
+// byte 0 bit 0 — output gain, only meaningful when VREF != VDD
 typedef enum {
     MCP4726_GAIN_1X = 0,
     MCP4726_GAIN_2X = 1,
