@@ -109,8 +109,12 @@ flowchart LR
 
 | Path | Role |
 |------|------|
-| `fpga/` | Tang Nano 20K RTL, constraints, Gowin build |
-| `esp32/` | ESP-IDF firmware (streamer) |
+| `fpga/rtl/` | Tang Nano 20K RTL: capture datapath, trigger, ring buffer, SPI slave, encoders |
+| `fpga/sim/` | Icarus Verilog test benches (`make -C fpga sim`) |
+| `fpga/constr/` | `.cst` pin map, `.sdc` timing |
+| `fpga/build/` | Gowin `gw_sh` build script |
+| `esp32/` | ESP-IDF firmware: AFE control + `fpga_link.c` SPI-master driver + streamer |
+| `docs/PROTOCOL.md` | ESP32 ↔ FPGA SPI register contract (shared by `scope_regs.svh` / `scope_proto.h`) |
 
 ## Build
 
@@ -119,6 +123,13 @@ flowchart LR
 ```bash
 make -C fpga/ build
 make -C fpga/ prog
+```
+
+**FPGA simulation** (needs [Icarus Verilog](https://steveicarus.github.io/iverilog/)):
+
+```bash
+make -C fpga/ sim            # run every bench
+make -C fpga/sim tb_top      # one bench; WAVES=1 also writes build/<name>.vcd
 ```
 
 **ESP32** (needs [ESP-IDF](https://docs.espressif.com/projects/esp-idf/)):
