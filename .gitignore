@@ -1,7 +1,9 @@
 # FPGA build outputs
 fpga/gowin_project/
 fpga/impl/
+fpga/sim/build/
 *.fs
+*.vcd
 
 # Generic object / binary noise
 *.bin

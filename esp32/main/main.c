@@ -11,6 +11,6 @@ void app_main(void)
     ESP_LOGI(TAG, "oscilloscope esp32 stub");
 
     ESP_ERROR_CHECK(afe_init());
-    fpga_link_init();
+    ESP_ERROR_CHECK(fpga_link_init());
     stream_init();
 }
