@@ -67,10 +67,7 @@ module tb_top;
         mst.cs_hi();
     endtask
 
-    integer i, n;
-    logic [7:0] lo, hi;
-    logic [9:0] code;
-    integer     nonzero;
+    integer n;
 
     initial begin
         // Let the PLL lock and POR release.
@@ -114,20 +111,10 @@ module tb_top;
         reg_read(7'h24, d); n = n | (d << 24);
         `EXPECT_EQ(n, PRE + POST, "record length = PRE + POST");
 
-        // Read the record: one long CS burst, header + turnaround + 2*n bytes.
-        mst.cs_lo();
-        mst.xfer_byte(8'h80 | 7'h40, d);   // read REG_REC_DATA
-        mst.xfer_byte(8'h00, d);           // turnaround
-        nonzero = 0;
-        for (i = 0; i < n; i = i + 1) begin
-            mst.xfer_byte(8'h00, lo);
-            mst.xfer_byte(8'h00, hi);
-            code = {hi[1:0], lo};
-            `EXPECT(code <= 10'd1023, "record code in range");
-            if (code != 0) nonzero = nonzero + 1;
-        end
-        mst.cs_hi();
-        `EXPECT(nonzero > 0, "record is not all zero");
+        // The sample record is no longer streamed over SPI (the FPGA renders it
+        // straight to HDMI). REG_REC_DATA now always reads back as pad.
+        reg_read(7'h40, d);
+        `EXPECT_EQ(d, 8'hFF, "REG_REC_DATA reads back as pad after readout retirement");
 
         // IRQ acknowledge clears the line.
         reg_write(7'h08, 8'h20);           // CONTROL.IRQ_CLR

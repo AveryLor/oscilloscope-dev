@@ -37,7 +37,11 @@ module top
     input  logic       dial_tg_b,
     input  logic       dial_tg_btn,
     output logic       probe_comp,
-    input  logic [2:0] fpga_flex
+    input  logic [2:0] fpga_flex,
+    output logic       tmds_clk_p,
+    output logic       tmds_clk_n,
+    output logic [2:0] tmds_data_p,
+    output logic [2:0] tmds_data_n
 );
 
     localparam int AW = $clog2(SAMPLE_DEPTH);
@@ -74,6 +78,18 @@ module top
     logic cap_arst_n, rst_cap_n;
     assign cap_arst_n = por_n & pll_lock_hk;
     reset_sync u_rst_cap (.clk(adc_sample_clk), .arst_n(cap_arst_n), .rst_n(rst_cap_n));
+
+    // HDMI pixel / TMDS-serial clocks off the 27 MHz crystal, and the
+    // pixel-domain reset (async-assert on por_n or PLL unlock).
+    logic serial_clk, pix_clk, pix_lock, rst_pix_n;
+    video_clkgen u_vclk (
+        .clk27      (clk),
+        .arst_n     (por_n),
+        .serial_clk (serial_clk),
+        .pix_clk    (pix_clk),
+        .pix_lock   (pix_lock)
+    );
+    reset_sync u_rst_pix (.clk(pix_clk), .arst_n(por_n & pix_lock), .rst_n(rst_pix_n));
 
     // ---- ADC input path: IOLOGIC pad registers ------------------------------
     // VIN+ / VIN- are swapped on the analog front end; adc_input_cond corrects
@@ -299,7 +315,9 @@ module top
         .rec_trig_off   (buf_rec_trig_off),
         .valid_count    (buf_valid_count),
         .overrange_cnt  (buf_overrange_cnt),
-        .rd_clk         (spi_sclk),
+        // Read port now serves the HDMI column reducer in the pixel domain.
+        // Reads only happen while frozen, so they never race the writer.
+        .rd_clk         (pix_clk),
         .rd_addr        (buf_rd_addr),
         .rd_en          (buf_rd_en),
         .rd_data        (buf_rd_data)
@@ -374,10 +392,6 @@ module top
         .spi_sta           (sta_spi)
     );
 
-    logic [AW-1:0] rec_start_spi;
-    cdc_bit_sync #(.WIDTH(AW)) u_recstart_spi (
-        .clk(spi_sclk), .d(buf_rec_start), .q(rec_start_spi));
-
     logic irq_level_spi;
     cdc_bit_sync #(.WIDTH(1)) u_irqlvl_spi (
         .clk(spi_sclk), .d(irq_level_hk), .q(irq_level_spi));
@@ -397,25 +411,22 @@ module top
     logic [5:0] enc_btn_spi;
     cdc_bit_sync #(.WIDTH(6)) u_enc_btn (.clk(spi_sclk), .d(enc_btn_hk), .q(enc_btn_spi));
 
-    // ---- Record readout bridge (spi_sclk domain) -----------------------
-    logic [7:0] rec_byte;
-    logic       rec_advance, rec_done, rec_underflow, rewind_stb;
+    // ---- Frozen-record geometry crossing CAP -> pixel domain -------------
+    // The HDMI column reducer reads the frozen capture buffer directly. The
+    // geometry is latched at the freeze cycle and static while frozen, so a
+    // plain synchronizer gated by the synced frozen flag is safe (same basis as
+    // status_cdc). This replaces the old SPI-domain record_readout_bridge; the
+    // ESP32 no longer streams samples (HDMI is the display).
+    logic              frozen_pix;
+    logic [AW-1:0]     rec_start_pix;
+    logic [CW-1:0]     rec_count_pix;
 
-    record_readout_bridge #(.DEPTH(SAMPLE_DEPTH)) u_readout (
-        .clk           (spi_sclk),
-        .rst_n         (por_n),
-        .frozen        (sta_spi.frozen),
-        .rec_start     (rec_start_spi),
-        .rec_count     (sta_spi.sample_count[CW-1:0]),
-        .rewind        (rewind_stb),
-        .buf_rd_addr   (buf_rd_addr),
-        .buf_rd_en     (buf_rd_en),
-        .buf_rd_data   (buf_rd_data),
-        .rec_byte      (rec_byte),
-        .rec_advance   (rec_advance),
-        .rec_done      (rec_done),
-        .rec_underflow (rec_underflow)
-    );
+    cdc_bit_sync #(.WIDTH(1)) u_frozen_pix (
+        .clk(pix_clk), .d(buf_frozen_w), .q(frozen_pix));
+    cdc_bit_sync #(.WIDTH(AW + CW)) u_recgeo_pix (
+        .clk(pix_clk),
+        .d  ({buf_rec_start, buf_rec_count}),
+        .q  ({rec_start_pix, rec_count_pix}));
 
     // ---- SPI slave + protocol -----------------------------------------
     logic [7:0] spi_rx_byte, spi_tx_byte, spi_byte_idx;
@@ -454,19 +465,41 @@ module top
         .enc_tg_cnt   (enc_tg_spi),
         .enc_btn      (enc_btn_spi),
         .enc_btn_rd   (enc_btn_rd_spi),
-        .rec_byte     (rec_byte),
-        .rec_done     (rec_done),
-        .rec_underflow(rec_underflow),
-        .rec_advance  (rec_advance),
+        // Record readout retired: HDMI is the display. REG_REC_DATA reads back
+        // as pad, REG_REC_STATUS as 0.
+        .rec_byte     (scope_pkg::SCOPE_REC_PAD),
+        .rec_done     (1'b0),
+        .rec_underflow(1'b0),
+        .rec_advance  (),
         .host_wr_stb  (host_wr_stb),
         .host_wr_addr (host_wr_addr),
         .host_wr_data (host_wr_data),
-        .rewind_stb   (rewind_stb)
+        .rewind_stb   ()
     );
 
     // ENC_BTN read clears the button events (SPI -> HK).
     cdc_pulse_toggle u_encbtn_clr (
         .src_clk(spi_sclk), .src_rst_n(por_n), .src_pulse(enc_btn_rd_spi),
         .dst_clk(clk), .dst_rst_n(rst_hk_n), .dst_pulse(enc_btn_clr_hk));
+
+    // ---- HDMI 720p display -------------------------------------------------
+    // Pixel / serial clocks and the pixel reset are generated above (u_vclk /
+    // u_rst_pix). video_top builds the column-reduced trace from the frozen
+    // capture buffer and drives the board's onboard HDMI connector.
+    video_top #(.DEPTH(SAMPLE_DEPTH)) u_video (
+        .pix_clk       (pix_clk),
+        .serial_clk    (serial_clk),
+        .rst_pix_n     (rst_pix_n),
+        .frozen_pix    (frozen_pix),
+        .rec_start_pix (rec_start_pix),
+        .rec_count_pix (rec_count_pix),
+        .buf_rd_addr   (buf_rd_addr),
+        .buf_rd_en     (buf_rd_en),
+        .buf_rd_data   (buf_rd_data),
+        .tmds_clk_p    (tmds_clk_p),
+        .tmds_clk_n    (tmds_clk_n),
+        .tmds_data_p   (tmds_data_p),
+        .tmds_data_n   (tmds_data_n)
+    );
 
 endmodule

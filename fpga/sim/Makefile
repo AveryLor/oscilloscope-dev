@@ -9,11 +9,14 @@
 IVERILOG ?= iverilog
 VVP      ?= vvp
 
-IFLAGS := -g2012 -Wall -Wno-timescale -I../rtl -I../rtl/cdc -I../rtl/common -I. -Imodels
+IFLAGS := -g2012 -Wall -Wno-timescale -I../rtl -I../rtl/cdc -I../rtl/common -I../rtl/video -I. -Imodels
 
-# scope_pkg.sv must come first so the package is defined before it is imported.
-RTL_ALL := $(wildcard ../rtl/*.sv ../rtl/*.v ../rtl/cdc/*.sv ../rtl/common/*.sv)
-RTL     := ../rtl/scope_pkg.sv $(filter-out ../rtl/scope_pkg.sv,$(RTL_ALL))
+# scope_pkg.sv and video_pkg.sv must come first so the packages are defined
+# before any module imports them.
+RTL_ALL := $(wildcard ../rtl/*.sv ../rtl/*.v ../rtl/cdc/*.sv ../rtl/common/*.sv \
+                      ../rtl/video/*.sv ../rtl/video/*.v)
+RTL     := ../rtl/scope_pkg.sv ../rtl/video/video_pkg.sv \
+           $(filter-out ../rtl/scope_pkg.sv ../rtl/video/video_pkg.sv,$(RTL_ALL))
 MODELS  := $(wildcard models/*.v models/*.sv)
 
 TBS := $(basename $(notdir $(wildcard tb_*.sv)))

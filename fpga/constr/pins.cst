@@ -104,3 +104,21 @@ IO_PORT "dial_tg_btn" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 
 IO_LOC  "probe_comp" 31;
 IO_PORT "probe_comp" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8;
+
+// Onboard HDMI connector (TMDS). Tang Nano 20K routes the four differential
+// pairs to FPGA pins 33..40; the two numbers per IO_LOC are the P,N of a true
+// LVDS pair, and the matching *_n RTL port needs no separate line. VERIFY these
+// against the current Sipeed Tang Nano 20K reference .cst before flashing --
+// board revisions have moved the HDMI pins. Pins 33..40 are otherwise unused by
+// this design (ADC is 41/42/48.., SPI + encoders are 25..31).
+IO_LOC  "tmds_clk_p" 33,34;
+IO_PORT "tmds_clk_p" IO_TYPE=LVDS25 PULL_MODE=NONE DRIVE=8;
+
+IO_LOC  "tmds_data_p[0]" 35,36;
+IO_PORT "tmds_data_p[0]" IO_TYPE=LVDS25 PULL_MODE=NONE DRIVE=8;
+
+IO_LOC  "tmds_data_p[1]" 37,38;
+IO_PORT "tmds_data_p[1]" IO_TYPE=LVDS25 PULL_MODE=NONE DRIVE=8;
+
+IO_LOC  "tmds_data_p[2]" 39,40;
+IO_PORT "tmds_data_p[2]" IO_TYPE=LVDS25 PULL_MODE=NONE DRIVE=8;
