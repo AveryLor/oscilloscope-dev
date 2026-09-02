@@ -8,13 +8,26 @@ create_clock -name clk27 -period 37.037 [get_ports {clk}]
 # rPLL. Keep this period in sync with the ESP32 SPI config in esp32/main/.
 create_clock -name spi_sclk -period 25.000 [get_ports {spi_sclk}]
 
-# Three unrelated domains: capture (fpga_clk / rPLL), housekeeping (clk27), SPI.
-# adc_sample_clk is a generated clock off fpga_clk; Gowin derives it from the
-# rPLL primitive, so it travels with the fpga_clk group.
+# HDMI pixel-clock chain (fpga/rtl/video/video_clkgen.v): the 27 MHz crystal ->
+# rPLL x55 / 4 -> 371.25 MHz TMDS serial clock (CLKOUT), then CLKDIV /5 ->
+# 74.25 MHz pixel clock. Gowin usually auto-derives PLL/CLKDIV outputs; these are
+# explicit so the video domain is always constrained and named.
+create_generated_clock -name serial_clk -source [get_ports {clk}] \
+    -multiply_by 55 -divide_by 4 \
+    [get_pins {u_video/u_clkgen/rpll_inst/CLKOUT}]
+create_generated_clock -name pix_clk -source [get_pins {u_video/u_clkgen/rpll_inst/CLKOUT}] \
+    -divide_by 5 \
+    [get_pins {u_video/u_clkgen/clkdiv_inst/CLKOUT}]
+
+# Four unrelated domains: capture (fpga_clk / rPLL), housekeeping (clk27), SPI,
+# and the video pixel/serial chain. adc_sample_clk is a generated clock off
+# fpga_clk; Gowin derives it from the rPLL primitive, so it travels with the
+# fpga_clk group.
 set_clock_groups -asynchronous \
     -group {fpga_clk} \
     -group {clk27} \
-    -group {spi_sclk}
+    -group {spi_sclk} \
+    -group {serial_clk pix_clk}
 
 # hw_trigger is an asynchronous input from J4; top.sv carries it through a
 # two-stage synchronizer (hw_trigger_q -> hw_trigger_sync).
