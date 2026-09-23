@@ -1,37 +1,80 @@
 # Oscilloscope
 
-FPGA + ESP32 firmware for an oscilloscope: the Tang Nano 20K buffers ADC samples; an ESP32 streams them to a laptop for display.
+A single-channel 105 MSPS oscilloscope. An AD9215 ADC feeds a Tang Nano 20K FPGA that triggers and freezes captures; an ESP32 sets the analog front end, reads each frozen record over SPI, reduces it to a 1000-column min/max envelope and streams it over USB-UART to a Python GUI, which sends control commands back on the same link.
 
 ## Hardware
 
 - Sipeed Tang Nano 20K (GW2AR-18C) — [datasheet](https://dl.sipeed.com/shareURL/TANG/Nano_20K/1_Datasheet)
 - ESP32 DevKit V1 (Elegoo, ESP-WROOM-32) (laptop link)
+- AD9215-105 ADC (10-bit, 105 MSPS), PL133 clock fan-out
+- LMH6518 variable-gain amplifier, MCP4726 offset DAC, relay FETs for divider / coupling / termination
 
 ## System architecture
 
-Mermaid flowchart of ADC capture flow from the schematics. 
-
 ```mermaid
-flowchart LR
-  ADC[AD9215_D0_D9_OR] --> FPGA
-  Clk[PL133_FPGA_CLK] --> FPGA
-  EncH[HS_HO_TG_encoders] --> FPGA
-  Probe[PROBE_COMP] --> FPGA
-  ESP32 -->|"HSPI VGA_MOSI SDIO"| VGA[LMH6518]
-  Dac[MCP4726_I2C] --> ESP32
-  Relays[atten_term_coupling] --> ESP32
-  EncV[VS_VO_encoders] --> ESP32
-  ESP32 -->|"VSPI FPGA_MOSI cmds"| FPGA
-  FPGA -->|"VSPI FPGA_MISO samples"| ESP32
-  ESP32 -->|"USB_UART frames"| PC[Python GUI]
-  PC -->|"USB_UART cmds"| ESP32
+flowchart TB
+  subgraph AFE["Analog front end"]
+    IN["Probe input (BNC)"] --> NET["Input network<br/>÷1 / ÷10 / ÷100 · AC/DC · 1 MΩ / 50 Ω"]
+    NET --> VGA["LMH6518 VGA<br/>18.8 / 38.8 dB preamp, 0 to −20 dB ladder"]
+    DAC["MCP4726 DAC<br/>12-bit vertical offset"] -->|offset| VGA
+    VGA -->|differential| ADC["AD9215-105 ADC<br/>10-bit · 105 MSPS"]
+    CLK["105 MHz clock<br/>PL133 fan-out"] -->|encode| ADC
+  end
+
+  subgraph FPGA["FPGA · Tang Nano 20K"]
+    CAP["Capture · 105 MHz<br/>VIN± fix → decimate → trigger<br/>→ 16k ring buffer → freeze"]
+    HK["Housekeeping · 27 MHz<br/>settings arbiter · IRQ latch<br/>1 kHz probe comp"]
+    SPIS["SPI slave<br/>register file + record readout"]
+    HK -->|config| CAP
+    CAP -->|frozen record| SPIS
+    SPIS -->|register writes| HK
+  end
+
+  subgraph ESP["ESP32 · DevKit V1"]
+    STR["Streamer<br/>1000 min/max columns, CRC-32 frame"]
+    CMD["Command parser<br/>SET_* lines"]
+    AFEC["AFE control<br/>applied at most every 80 ms"]
+    CMD --> AFEC
+  end
+
+  subgraph HOST["Laptop"]
+    GUI["Python GUI<br/>PySide6 + pyqtgraph"]
+  end
+
+  ADC -->|"D0–D9 + OR"| CAP
+  CLK -->|FPGA_CLK| CAP
+  HWT["HW_TRIGGER · J4"] --> CAP
+  ENC["HS / HO / TG encoders"] --> HK
+  HK -->|"FPGA_IRQ → GPIO16"| STR
+  SPIS <-->|"VSPI 20 MHz, mode 0"| STR
+  CMD -->|"timebase / offset / trigger"| SPIS
+  AFEC -->|"GPIO ×4"| NET
+  AFEC -->|"HSPI 10 MHz"| VGA
+  AFEC -->|"I²C 400 kHz"| DAC
+  VSVO["VS / VO encoders<br/>not read by firmware yet"] -.-> AFEC
+  STR -->|"UART0 921600 8N1 · frames"| GUI
+  GUI -->|"SET_* text lines"| CMD
 ```
 
 | Block | Role |
 |-------|------|
-| **ESP32** | VGA, LNA DAC, relays, vertical knobs, SPI master, stream frozen captures over USB-UART |
-| **FPGA** | 105 Msps capture (`ADC_D*` + `FPGA_CLK`), SPI slave dump |
-| **GUI** | Draws the trace, graticule and readout from the streamed captures; sends dial/toggle control commands back to the ESP32 |
+| **Analog front end** | Input divider, AC/DC coupling and 1 MΩ/50 Ω termination relays → LMH6518 gain → AD9215 at 105 MSPS; MCP4726 sets vertical offset |
+| **FPGA** | Captures the ADC bus, corrects the swapped VIN±, decimates (optionally peak detect), triggers on level / external / force, freezes a record in a 16 384-sample ring buffer, raises `FPGA_IRQ`; SPI slave register file; reads the horizontal-scale, horizontal-offset and trigger-level knobs directly; generates the 1 kHz probe-compensation square wave |
+| **ESP32** | Drives the front end (relays over GPIO, LMH6518 over HSPI, MCP4726 over I2C); VSPI master to the FPGA; on each `FPGA_IRQ` reads the record, reduces it to 1000 min/max columns and streams it over UART0; applies `SET_*` commands from the GUI |
+| **GUI** | Draws the trace, trigger markers and readout from the streamed frames; Run/Pause and zoom; sends control commands back to the ESP32 |
+
+### Links
+
+| Link | Interface | Rate | Contract |
+|------|-----------|------|----------|
+| ADC → FPGA | 10-bit parallel + over-range, 2.5 V CMOS | 105 MSPS | `fpga/constr/pins.cst` |
+| ESP32 ↔ FPGA | VSPI (SPI3), mode 0, plus `FPGA_IRQ` | 20 MHz (FPGA allows ≤ 40 MHz) | [`docs/PROTOCOL.md`](docs/PROTOCOL.md) |
+| ESP32 → LMH6518 | HSPI (SPI2), 3-wire, write-only | 10 MHz | `components/lmh6518` |
+| ESP32 → MCP4726 | I2C, address 0x60 | 400 kHz | `components/mcp4726` |
+| ESP32 → laptop | UART0 via USB-serial bridge, 8N1, binary frames | 921600 baud, ≈20 frames/s | [`docs/STREAM.md`](docs/STREAM.md) |
+| Laptop → ESP32 | Same UART0, text command lines, no reply | 921600 baud | [`docs/CONTROL.md`](docs/CONTROL.md) |
+
+The FPGA runs three clock domains: 105 MHz capture (`FPGA_CLK` through an rPLL), 27 MHz housekeeping (onboard crystal: knobs, probe comp, IRQ, settings) and the SPI clock.
 
 ## Pinout
 
@@ -39,27 +82,27 @@ flowchart LR
 
 | Net | GPIO | Silk Screen | Why |
 |-----|------|------|-----|
-| `SDA` | 21 | D21 | Hardware I2C (`VSPIHD` unused) |
-| `SCL` | 22 | D22 | Hardware I2C (`VSPIWP` unused) |
-| `FPGA_SCLK` | 18 | D18 | `VSPICLK` → FPGA dump only |
+| `SDA` | 21 | D21 | Hardware I2C: MCP4726 + J5 (`VSPIHD` unused) |
+| `SCL` | 22 | D22 | Hardware I2C: MCP4726 + J5 (`VSPIWP` unused) |
+| `FPGA_SCLK` | 18 | D18 | `VSPICLK` → FPGA register access + record dump |
 | `FPGA_MOSI` | 23 | D23 | `VSPID` → FPGA commands |
-| `FPGA_MISO` | 19 | D19 | `VSPIQ` ← FPGA sample dump |
+| `FPGA_MISO` | 19 | D19 | `VSPIQ` ← FPGA sample dump; not on the Altium schematic yet |
 | `FPGA_CS` | 5 | D5 | `VSPICS0`, idle-high |
 | `FPGA_IRQ` | 16 | RX2 | Capture-ready from FPGA J6-6; active-high, needs internal pull-down |
 | `VGA_SCLK` | 14 | D14 | SPI Clk for control of the `LMH6518SQ` |
 | `VGA_MOSI` | 13 | D13 | MOSI control for the `LMH6518SQ` |
 | `VGA_CS` | 15 | D15 | Chip select for the `LMH6518SQ` |
-| `100X_10X` | 32 | D32 |  |
-| `10X_1X` | 33 | D33 |  |
-| `DC_COUP` | 25 | D25 |  |
-| `50_OHM_TERM` | 26 | D26 |  |
-| `DIAL_VS_A` | 36 | VP |  |
-| `DIAL_VS_B` | 39 | VN |  |
-| `DIAL_VS_BTN` | 34 | D34 |  |
-| `DIAL_VO_A` | 35 | D35 |  |
-| `DIAL_VO_B` | 17 | TX2 |  |
-| `DIAL_VO_BTN` | 4 | D4 |  |
-| `ESP_FLEX_3` | 27 | D27 |  |
+| `100X_10X` | 32 | D32 | Divider relay FET: 100× / 10× select (polarity unconfirmed, see `afe.c`) |
+| `10X_1X` | 33 | D33 | Divider relay FET: 10× / 1× select (polarity unconfirmed, see `afe.c`) |
+| `DC_COUP` | 25 | D25 | Coupling relay FET: high = DC, low = AC |
+| `50_OHM_TERM` | 26 | D26 | Termination relay FET: high = 50 Ω, low = 1 MΩ |
+| `DIAL_VS_A` | 36 | VP | Vertical-scale encoder A (input-only pin; not read by firmware yet) |
+| `DIAL_VS_B` | 39 | VN | Vertical-scale encoder B (input-only pin; not read by firmware yet) |
+| `DIAL_VS_BTN` | 34 | D34 | Vertical-scale button (input-only pin; not read by firmware yet) |
+| `DIAL_VO_A` | 35 | D35 | Vertical-offset encoder A (input-only pin; not read by firmware yet) |
+| `DIAL_VO_B` | 17 | TX2 | Vertical-offset encoder B (was `ESP_FLEX_1`; not read yet) |
+| `DIAL_VO_BTN` | 4 | D4 | Vertical-offset button (was `ESP_FLEX_2`; not read yet) |
+| `ESP_FLEX_3` | 27 | D27 | Spare line to the J5 trigger module |
 
 ### FPGA (Tang Nano 20K)
 
@@ -117,6 +160,7 @@ flowchart LR
 | `fpga/build/` | Gowin `gw_sh` build script |
 | `esp32/` | ESP-IDF firmware: AFE control + `fpga_link.c` SPI-master driver + streamer |
 | `gui/` | Python host display + control (`oscilloscope-gui --port /dev/ttyUSB0`, PySide6 + pyqtgraph) |
+| `gui/tools/` | Hardware-free demo: `fake_scope.py` streams a synthetic sine wave, `run_demo.sh` wires it to the GUI over a virtual serial pair |
 | `docs/PROTOCOL.md` | ESP32 ↔ FPGA SPI register contract (shared by `scope_regs.svh` / `scope_proto.h`) |
 | `docs/STREAM.md` | ESP32 → host sample-stream format (shared by `stream_frame.h` / `frame.py`) |
 | `docs/CONTROL.md` | Host → ESP32 control-command format (shared by `cmd_parse.h` / `control.py`) |
@@ -165,6 +209,15 @@ pip install -e ".[dev]"
 oscilloscope-gui --list                  # show serial ports
 oscilloscope-gui --port /dev/ttyUSB0
 pytest                                   # includes the C-interop format check
+```
+
+GUI controls: **Pause/Run** (`Space`) freezes the trace; **Zoom +** / **Zoom −** / **Fit** (`Ctrl+=` / `Ctrl+-` / `Ctrl+0`), or the mouse wheel over the plot.
+
+**GUI without hardware** (needs `socat`): streams a synthetic sine wave through a virtual serial pair and opens the GUI on it. Closing the GUI or pressing `Ctrl+C` shuts everything down.
+
+```bash
+cd gui
+./tools/run_demo.sh                      # extra flags pass to fake_scope.py, e.g. --freq 2 --amplitude 300
 ```
 
 ## Branch protection (`main`)
