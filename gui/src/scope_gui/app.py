@@ -121,6 +121,11 @@ class MainWindow(QMainWindow):
         self.connect_btn = QPushButton("Connect")
         self.connect_btn.clicked.connect(self._on_connect_clicked)
 
+        self.pause_btn = QPushButton("Pause")
+        self.pause_btn.setCheckable(True)
+        self.pause_btn.setShortcut(Qt.Key_Space)
+        self.pause_btn.toggled.connect(lambda paused: self.pause_btn.setText("Run" if paused else "Pause"))
+
         self.status_label = QLabel("not connected")
 
         row.addWidget(QLabel("Port:"))
@@ -129,6 +134,7 @@ class MainWindow(QMainWindow):
         row.addWidget(QLabel("Baud:"))
         row.addWidget(self.baud_spin)
         row.addWidget(self.connect_btn)
+        row.addWidget(self.pause_btn)
         row.addWidget(self.status_label, stretch=1)
 
     def _build_plot(self) -> None:
@@ -152,9 +158,10 @@ class MainWindow(QMainWindow):
         self._trig_pos_line.hide()
 
         self._no_signal = pg.TextItem("no signal", anchor=(0.5, 0.5), color="#888888")
-        self.plot.addItem(self._no_signal)
+        self.plot.addItem(self._no_signal, ignoreBounds=True)
         self.plot.getViewBox().setAutoVisible(y=True)
         self.plot.setRange(xRange=(0, 1), yRange=(-1, 1), padding=0)
+        self.plot.enableAutoRange()
 
     def _build_readout_dock(self) -> None:
         dock = QDockWidget("Readout", self)
@@ -444,7 +451,8 @@ class MainWindow(QMainWindow):
                     gap = (f.seq - self.last_seq) & 0xFFFFFFFF
                     self.dropped += max(0, gap - 1)
                 self.last_seq = f.seq
-                self.latest = f
+                if not self.pause_btn.isChecked():
+                    self.latest = f
                 self.frames += 1
                 if not self._synced_controls:
                     self._sync_controls_from_frame(f)
@@ -470,7 +478,7 @@ class MainWindow(QMainWindow):
             self.frames = 0
             self._fps_since = now
 
-        if self.latest is not None:
+        if self.latest is not None and not self.pause_btn.isChecked():
             self._no_signal.hide()
             self._update_plot(self.latest)
             self._update_readout(self.latest)
