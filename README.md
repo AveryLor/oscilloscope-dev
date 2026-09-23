@@ -23,13 +23,14 @@ flowchart LR
   EncV[VS_VO_encoders] --> ESP32
   ESP32 -->|"VSPI FPGA_MOSI cmds"| FPGA
   FPGA -->|"VSPI FPGA_MISO samples"| ESP32
-  ESP32 --> PC[USB_UART]
+  ESP32 -->|"USB_UART frames"| PC[Rust GUI]
 ```
 
 | Block | Role |
 |-------|------|
 | **ESP32** | VGA, LNA DAC, relays, vertical knobs, SPI master, stream frozen captures over USB-UART |
 | **FPGA** | 105 Msps capture (`ADC_D*` + `FPGA_CLK`), SPI slave dump |
+| **GUI** | Draws the trace, graticule and readout from the streamed captures |
 
 ## Pinout
 
@@ -114,7 +115,9 @@ flowchart LR
 | `fpga/constr/` | `.cst` pin map, `.sdc` timing |
 | `fpga/build/` | Gowin `gw_sh` build script |
 | `esp32/` | ESP-IDF firmware: AFE control + `fpga_link.c` SPI-master driver + streamer |
+| `gui/` | Rust host display (`cargo run --release -- --port /dev/ttyUSB0`) |
 | `docs/PROTOCOL.md` | ESP32 ↔ FPGA SPI register contract (shared by `scope_regs.svh` / `scope_proto.h`) |
+| `docs/STREAM.md` | ESP32 → host sample-stream format (shared by `stream.h` / `frame.rs`) |
 
 ## Build
 
@@ -138,7 +141,26 @@ make -C fpga/sim tb_top      # one bench; WAVES=1 also writes build/<name>.vcd
 cd esp32
 idf.py set-target esp32
 idf.py build
-idf.py flash monitor
+idf.py flash
+```
+
+Do not leave `idf.py monitor` attached while the GUI is running — the sample
+stream and the monitor share UART0, and only one process can hold the port.
+
+The framing and column-reduction logic build without ESP-IDF, so they can be
+tested with just a C compiler:
+
+```bash
+make -C esp32/test
+```
+
+**Host GUI** (needs [Rust](https://rustup.rs/)):
+
+```bash
+cd gui
+cargo run --release -- --list            # show serial ports
+cargo run --release -- --port /dev/ttyUSB0
+cargo test                               # includes the C-interop format check
 ```
 
 ## Branch protection (`main`)

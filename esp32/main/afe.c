@@ -30,6 +30,14 @@ static const afe_config_t k_default = {
  * guess pending the schematic — TODO: confirm PIN_RELAY_100X_10X /
  * PIN_RELAY_10X_1X active levels and the 1x/10x/100x mapping.
  */
+// Last configuration handed to afe_set; reported in the sample stream so the
+// host can turn ADC codes into volts.
+static afe_config_t s_cfg;
+
+void afe_get(afe_config_t *out) {
+    *out = s_cfg;
+}
+
 static void afe_apply_atten(afe_atten_t a) {
     int sel_100x = (a == AFE_ATTEN_100X);
     int sel_10x  = (a == AFE_ATTEN_10X);
@@ -89,6 +97,7 @@ esp_err_t afe_set(const afe_config_t *cfg) {
         return ESP_ERR_INVALID_ARG;
     }
 
+    s_cfg = *cfg;
     afe_apply_atten(cfg->atten);
     gpio_set_level(PIN_RELAY_DC_COUP, cfg->dc_coupled);
     gpio_set_level(PIN_RELAY_50_OHM, cfg->term_50r);

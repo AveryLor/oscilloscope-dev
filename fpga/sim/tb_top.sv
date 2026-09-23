@@ -68,6 +68,9 @@ module tb_top;
     endtask
 
     integer n;
+    logic [7:0] lo, hi;
+    logic [9:0] code;
+    logic       all_in_range, any_non_pad;
 
     initial begin
         // Let the PLL lock and POR release.
@@ -111,10 +114,28 @@ module tb_top;
         reg_read(7'h24, d); n = n | (d << 24);
         `EXPECT_EQ(n, PRE + POST, "record length = PRE + POST");
 
-        // The sample record is no longer streamed over SPI (the FPGA renders it
-        // straight to HDMI). REG_REC_DATA now always reads back as pad.
-        reg_read(7'h40, d);
-        `EXPECT_EQ(d, 8'hFF, "REG_REC_DATA reads back as pad after readout retirement");
+        // Walk the record back out over SPI. REG_REC_DATA pops one byte per
+        // read and does not auto-increment; each entry is two little-endian
+        // bytes, lo = code[7:0] and hi = {is_max, over_range, 4'b0, code[9:8]}.
+        reg_write(7'h08, 8'h40);           // CONTROL.REC_REWIND
+        all_in_range = 1'b1;
+        any_non_pad  = 1'b0;
+        for (int e = 0; e < 8; e++) begin
+            reg_read(7'h40, lo);
+            reg_read(7'h40, hi);
+            code = {hi[1:0], lo};
+            if (code > 10'd1023) all_in_range = 1'b0;
+            if ({hi, lo} !== 16'hFFFF) any_non_pad = 1'b1;
+        end
+        `EXPECT(all_in_range, "record entries decode to in-range codes");
+        `EXPECT(any_non_pad, "record readout returns real samples, not pad");
+
+        // Reading past the end of the record pads and flags underflow.
+        reg_write(7'h08, 8'h40);           // rewind, then overrun deliberately
+        for (int e = 0; e < 2 * (PRE + POST) + 2; e++) reg_read(7'h40, d);
+        `EXPECT_EQ(d, 8'hFF, "read past end of record returns pad");
+        reg_read(7'h41, d);
+        `EXPECT(d[RECST_UNDERFLOW_BIT] === 1'b1, "REC_STATUS flags underflow past end");
 
         // IRQ acknowledge clears the line.
         reg_write(7'h08, 8'h20);           // CONTROL.IRQ_CLR
