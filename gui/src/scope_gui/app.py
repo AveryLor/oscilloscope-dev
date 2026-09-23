@@ -154,6 +154,7 @@ class MainWindow(QMainWindow):
         self._no_signal = pg.TextItem("no signal", anchor=(0.5, 0.5), color="#888888")
         self.plot.addItem(self._no_signal)
         self.plot.getViewBox().setAutoVisible(y=True)
+        self.plot.setRange(xRange=(0, 1), yRange=(-1, 1), padding=0)
 
     def _build_readout_dock(self) -> None:
         dock = QDockWidget("Readout", self)
