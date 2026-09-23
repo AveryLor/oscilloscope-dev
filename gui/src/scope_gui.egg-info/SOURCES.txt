@@ -1,0 +1,17 @@
+pyproject.toml
+src/scope_gui/__init__.py
+src/scope_gui/app.py
+src/scope_gui/control.py
+src/scope_gui/frame.py
+src/scope_gui/link.py
+src/scope_gui/main.py
+src/scope_gui.egg-info/PKG-INFO
+src/scope_gui.egg-info/SOURCES.txt
+src/scope_gui.egg-info/dependency_links.txt
+src/scope_gui.egg-info/entry_points.txt
+src/scope_gui.egg-info/requires.txt
+src/scope_gui.egg-info/top_level.txt
+tests/test_c_interop.py
+tests/test_control.py
+tests/test_frame.py
+tests/test_link.py

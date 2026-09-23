@@ -11,6 +11,8 @@ fpga/sim/build/
 *.map
 *.o
 *.a
+# ...except committed test fixtures, which are small and deterministic.
+!gui/tests/fixtures/*.bin
 
 # Gowin EDA IDE junk
 *.gprj
@@ -26,6 +28,15 @@ esp32/sdkconfig
 esp32/sdkconfig.old
 esp32/dependencies.lock
 esp32/managed_components/
+
+# Host GUI (Python)
+gui/*.egg-info/
+gui/build/
+gui/dist/
+gui/.pytest_cache/
+
+# Host-side firmware test binaries
+esp32/test/build/
 
 # PlatformIO (if used later)
 .pio/

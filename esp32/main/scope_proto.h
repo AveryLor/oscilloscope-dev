@@ -138,6 +138,10 @@
 // A read past the end of the record returns this byte.
 #define SCOPE_REC_PAD 0xFFu
 
+// 10-bit ADC code range; mid-scale is 0 V in after the front end.
+#define SCOPE_CODE_MAX 1023u
+#define SCOPE_CODE_MID 512u
+
 /*
  * Record entry, as reassembled from two little-endian REC_DATA bytes:
  *   byte 0 = code[7:0]

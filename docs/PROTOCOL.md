@@ -132,6 +132,12 @@ knob turn updates the same working value, so `TRIG_LEVEL` / `DEC_FACTOR` /
 `PRE_COUNT` / `POST_COUNT` read back the current effective setting whichever
 source last moved it.
 
+There are now two ESP32-side writers of these registers: the one-shot
+`scope_arm()` used at startup, and the per-field live writers in
+`esp32/main/live_cfg.c` driven by host text commands (`docs/CONTROL.md`) —
+both go through the same last-writer-wins registers described above, so they
+compose with a physical knob turn exactly the way `scope_arm()` always did.
+
 ### Read a frozen record
 
 ```

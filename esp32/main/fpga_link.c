@@ -1,5 +1,6 @@
 #include "fpga_link.h"
 #include <string.h>
+#include "envelope.h"
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "freertos/FreeRTOS.h"
@@ -256,6 +257,74 @@ esp_err_t scope_read_record(scope_sample_t *out, size_t max_samples,
         got += want;
     }
     *n_out = got;
+
+    (void)fpga_link_write8(REG_CONTROL, CTRL_IRQ_CLR);
+    return ESP_OK;
+}
+
+esp_err_t scope_read_envelope(scope_envelope_t *env, size_t n_cols) {
+    if (env == NULL || n_cols == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint8_t cnt[4] = {0};
+    esp_err_t err = fpga_link_read_reg(REG_SAMPLE_COUNT_0, cnt, 4);
+    if (err != ESP_OK) {
+        return err;
+    }
+    uint32_t n = (uint32_t)cnt[0] | ((uint32_t)cnt[1] << 8)
+               | ((uint32_t)cnt[2] << 16) | ((uint32_t)cnt[3] << 24);
+
+    env->sample_count = n;
+    env->trig_off     = 0;
+    env->over_range   = 0;
+    env->n_cols       = n_cols;
+
+    uint8_t off[4] = {0};
+    if (fpga_link_read_reg(REG_TRIG_PTR_0, off, 4) == ESP_OK) {
+        env->trig_off = (uint32_t)off[0] | ((uint32_t)off[1] << 8)
+                      | ((uint32_t)off[2] << 16) | ((uint32_t)off[3] << 24);
+    }
+
+    // An empty record still needs defined columns, or the host would plot
+    // whatever was left in the buffer from the previous capture.
+    envelope_acc_t acc;
+    envelope_begin(&acc, env->ymin, env->ymax, n_cols, n, SCOPE_CODE_MID);
+
+    if (n == 0) {
+        (void)fpga_link_write8(REG_CONTROL, CTRL_IRQ_CLR);
+        return ESP_OK;
+    }
+
+    err = fpga_link_write8(REG_CONTROL, CTRL_REC_REWIND);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    // Reduce to min/max per column as the bytes arrive, so a 32 kB record never
+    // has to be held whole.
+    uint8_t chunk[512];
+    uint32_t got = 0;
+
+    while (got < n) {
+        uint32_t want = n - got;
+        if (want > sizeof(chunk) / REC_BYTES_PER_SAMPLE) {
+            want = sizeof(chunk) / REC_BYTES_PER_SAMPLE;
+        }
+        err = fpga_link_read_reg(REG_REC_DATA, chunk, want * REC_BYTES_PER_SAMPLE);
+        if (err != ESP_OK) {
+            return err;
+        }
+        for (uint32_t i = 0; i < want; i++) {
+            scope_sample_t s = scope_decode_sample(chunk[2 * i], chunk[2 * i + 1]);
+            envelope_push(&acc, got + i, s.code);
+            if (s.over_range) {
+                env->over_range = 1;
+            }
+        }
+        got += want;
+    }
+    envelope_finish(&acc);
 
     (void)fpga_link_write8(REG_CONTROL, CTRL_IRQ_CLR);
     return ESP_OK;

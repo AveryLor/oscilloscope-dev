@@ -46,3 +46,6 @@ esp_err_t afe_init(void);
 
 /* Apply a full front-end configuration in one call. */
 esp_err_t afe_set(const afe_config_t *cfg);
+
+/* Copy out the configuration currently applied. */
+void afe_get(afe_config_t *out);

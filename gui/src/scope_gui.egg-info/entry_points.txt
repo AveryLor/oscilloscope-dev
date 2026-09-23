@@ -1,0 +1,2 @@
+[console_scripts]
+oscilloscope-gui = scope_gui.main:main

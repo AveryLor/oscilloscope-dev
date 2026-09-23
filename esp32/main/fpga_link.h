@@ -58,3 +58,18 @@ esp_err_t scope_wait_ready(uint32_t timeout_ms);
  * within the record via *trig_off (may be NULL). Acknowledges the IRQ. */
 esp_err_t scope_read_record(scope_sample_t *out, size_t max_samples,
                             size_t *n_out, uint32_t *trig_off);
+
+/* Column-reduced view of one record: per column, the min and max code seen. */
+typedef struct {
+    uint16_t *ymin;
+    uint16_t *ymax;
+    size_t    n_cols;       // columns ymin/ymax point at; set by the caller
+    uint32_t  sample_count; // entries in the record before reduction
+    uint32_t  trig_off;     // trigger position within the record
+    uint8_t   over_range;   // any sample in the record clipped
+} scope_envelope_t;
+
+/* Read the frozen record straight into a min/max envelope of n_cols columns,
+ * reducing as the bytes arrive so the whole record never has to be buffered.
+ * env->ymin/ymax must each hold n_cols entries. Acknowledges the IRQ. */
+esp_err_t scope_read_envelope(scope_envelope_t *env, size_t n_cols);

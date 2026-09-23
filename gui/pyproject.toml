@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scope-gui"
+version = "0.1.0"
+description = "Host display and control for the Tang Nano 20K / ESP32 oscilloscope"
+requires-python = ">=3.10"
+dependencies = [
+    "PySide6>=6.6",
+    "pyqtgraph>=0.13",
+    "pyserial>=3.5",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+oscilloscope-gui = "scope_gui.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
