@@ -23,14 +23,15 @@ flowchart LR
   EncV[VS_VO_encoders] --> ESP32
   ESP32 -->|"VSPI FPGA_MOSI cmds"| FPGA
   FPGA -->|"VSPI FPGA_MISO samples"| ESP32
-  ESP32 -->|"USB_UART frames"| PC[Rust GUI]
+  ESP32 -->|"USB_UART frames"| PC[Python GUI]
+  PC -->|"USB_UART cmds"| ESP32
 ```
 
 | Block | Role |
 |-------|------|
 | **ESP32** | VGA, LNA DAC, relays, vertical knobs, SPI master, stream frozen captures over USB-UART |
 | **FPGA** | 105 Msps capture (`ADC_D*` + `FPGA_CLK`), SPI slave dump |
-| **GUI** | Draws the trace, graticule and readout from the streamed captures |
+| **GUI** | Draws the trace, graticule and readout from the streamed captures; sends dial/toggle control commands back to the ESP32 |
 
 ## Pinout
 
@@ -115,9 +116,10 @@ flowchart LR
 | `fpga/constr/` | `.cst` pin map, `.sdc` timing |
 | `fpga/build/` | Gowin `gw_sh` build script |
 | `esp32/` | ESP-IDF firmware: AFE control + `fpga_link.c` SPI-master driver + streamer |
-| `gui/` | Rust host display (`cargo run --release -- --port /dev/ttyUSB0`) |
+| `gui/` | Python host display + control (`oscilloscope-gui --port /dev/ttyUSB0`, PySide6 + pyqtgraph) |
 | `docs/PROTOCOL.md` | ESP32 ↔ FPGA SPI register contract (shared by `scope_regs.svh` / `scope_proto.h`) |
-| `docs/STREAM.md` | ESP32 → host sample-stream format (shared by `stream.h` / `frame.rs`) |
+| `docs/STREAM.md` | ESP32 → host sample-stream format (shared by `stream_frame.h` / `frame.py`) |
+| `docs/CONTROL.md` | Host → ESP32 control-command format (shared by `cmd_parse.h` / `control.py`) |
 
 ## Build
 
@@ -147,20 +149,22 @@ idf.py flash
 Do not leave `idf.py monitor` attached while the GUI is running — the sample
 stream and the monitor share UART0, and only one process can hold the port.
 
-The framing and column-reduction logic build without ESP-IDF, so they can be
-tested with just a C compiler:
+The framing, column-reduction, and control-command-parsing logic all build
+without ESP-IDF, so they can be tested with just a C compiler:
 
 ```bash
 make -C esp32/test
 ```
 
-**Host GUI** (needs [Rust](https://rustup.rs/)):
+**Host GUI** (needs [Python](https://www.python.org/) >= 3.10):
 
 ```bash
 cd gui
-cargo run --release -- --list            # show serial ports
-cargo run --release -- --port /dev/ttyUSB0
-cargo test                               # includes the C-interop format check
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+oscilloscope-gui --list                  # show serial ports
+oscilloscope-gui --port /dev/ttyUSB0
+pytest                                   # includes the C-interop format check
 ```
 
 ## Branch protection (`main`)

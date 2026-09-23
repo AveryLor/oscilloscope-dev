@@ -7,6 +7,7 @@
 
 #include "afe.h"
 #include "fpga_link.h"
+#include "live_cfg.h"
 #include "scope_proto.h"
 #include "stream_frame.h"
 
@@ -55,7 +56,7 @@ static void stream_task(void *arg) {
     // the host sees a live trace without asking for each one. The AUTO timeout
     // means an idle input still produces frames instead of waiting forever for
     // an edge that never comes.
-    const scope_acq_cfg_t acq = {
+    const scope_acq_cfg_t initial = {
         .mode         = MODE_AUTO,
         .peak_detect  = false,
         .trig_src     = TRIGCFG_SRC_LEVEL,
@@ -70,7 +71,10 @@ static void stream_task(void *arg) {
         .auto_rearm   = true,
     };
 
-    esp_err_t err = scope_arm(&acq);
+    // live_cfg owns the shared mirror of this config from here on: stream.c
+    // reads it every loop iteration below, and cmd.c's SET_TIMEBASE /
+    // SET_HOFFSET / SET_TRIGGER handlers write it live (see live_cfg.h).
+    esp_err_t err = live_cfg_init(&initial);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "arm: %s", esp_err_to_name(err));
         vTaskDelete(NULL);
@@ -92,13 +96,20 @@ static void stream_task(void *arg) {
     for (;;) {
         if (scope_wait_ready(CAPTURE_TIMEOUT_MS) != ESP_OK) {
             // No capture within the window: re-arm rather than wedging, in
-            // case an IRQ edge was lost.
+            // case an IRQ edge was lost. Re-read live_cfg first so the re-arm
+            // re-applies whatever the host most recently commanded instead of
+            // reverting to the boot-time defaults.
+            scope_acq_cfg_t acq;
+            live_cfg_get_acq(&acq);
             (void)scope_arm(&acq);
             continue;
         }
         if (scope_read_envelope(&env, STREAM_COLS) != ESP_OK) {
             continue;
         }
+
+        scope_acq_cfg_t acq;
+        live_cfg_get_acq(&acq);
 
         uint8_t status = 0;
         (void)fpga_link_read8(REG_STATUS, &status);

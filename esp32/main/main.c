@@ -1,6 +1,7 @@
 #include "esp_log.h"
 
 #include "afe.h"
+#include "cmd.h"
 #include "fpga_link.h"
 #include "stream.h"
 
@@ -13,4 +14,5 @@ void app_main(void)
     ESP_ERROR_CHECK(afe_init());
     ESP_ERROR_CHECK(fpga_link_init());
     stream_init();
+    cmd_init();
 }

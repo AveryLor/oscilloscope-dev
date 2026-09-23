@@ -1,0 +1,10 @@
+Metadata-Version: 2.4
+Name: scope-gui
+Version: 0.1.0
+Summary: Host display and control for the Tang Nano 20K / ESP32 oscilloscope
+Requires-Python: >=3.10
+Requires-Dist: PySide6>=6.6
+Requires-Dist: pyqtgraph>=0.13
+Requires-Dist: pyserial>=3.5
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0; extra == "dev"
