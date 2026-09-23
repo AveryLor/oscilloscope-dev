@@ -9,6 +9,7 @@ import time
 import pyqtgraph as pg
 import serial
 from PySide6.QtCore import Qt, QSignalBlocker, QTimer
+from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -126,6 +127,16 @@ class MainWindow(QMainWindow):
         self.pause_btn.setShortcut(Qt.Key_Space)
         self.pause_btn.toggled.connect(lambda paused: self.pause_btn.setText("Run" if paused else "Pause"))
 
+        self.zoom_in_btn = QPushButton("Zoom +")
+        self.zoom_in_btn.setShortcut(QKeySequence.ZoomIn)
+        self.zoom_in_btn.clicked.connect(lambda: self._zoom(0.5))
+        self.zoom_out_btn = QPushButton("Zoom −")
+        self.zoom_out_btn.setShortcut(QKeySequence.ZoomOut)
+        self.zoom_out_btn.clicked.connect(lambda: self._zoom(2.0))
+        self.fit_btn = QPushButton("Fit")
+        self.fit_btn.setShortcut(QKeySequence("Ctrl+0"))
+        self.fit_btn.clicked.connect(lambda: self.plot.enableAutoRange())
+
         self.status_label = QLabel("not connected")
 
         row.addWidget(QLabel("Port:"))
@@ -135,6 +146,9 @@ class MainWindow(QMainWindow):
         row.addWidget(self.baud_spin)
         row.addWidget(self.connect_btn)
         row.addWidget(self.pause_btn)
+        row.addWidget(self.zoom_in_btn)
+        row.addWidget(self.zoom_out_btn)
+        row.addWidget(self.fit_btn)
         row.addWidget(self.status_label, stretch=1)
 
     def _build_plot(self) -> None:
@@ -311,6 +325,10 @@ class MainWindow(QMainWindow):
 
         dock.setWidget(panel)
         self.addDockWidget(Qt.LeftDockWidgetArea, dock)
+
+    def _zoom(self, factor: float) -> None:
+        vb = self.plot.getViewBox()
+        vb.scaleBy((factor, factor), center=vb.viewRect().center())
 
     def _set_controls_enabled(self, enabled: bool) -> None:
         for w in self._control_widgets:

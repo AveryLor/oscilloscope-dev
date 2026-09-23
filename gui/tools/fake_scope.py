@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import random
 import time
 import zlib
 
@@ -20,6 +21,8 @@ MAGIC = 0x53434F50
 VERSION = 1
 FLAG_TRIGGERED = 1 << 1
 ADC_CODE_MID = 512
+SUBSAMPLES = 4
+NOISE_CODES = 1.5
 
 
 def build_frame(seq: int, n_cols: int, t: float, freq_hz: float, amplitude: int) -> bytes:
@@ -47,11 +50,15 @@ def build_frame(seq: int, n_cols: int, t: float, freq_hz: float, amplitude: int)
 
     payload = bytearray()
     for i in range(n_cols):
-        phase = 2 * math.pi * freq_hz * (t + i / n_cols)
-        center = ADC_CODE_MID + amplitude * math.sin(phase)
-        wobble = 6 * math.sin(20 * phase)  # gives the envelope visible thickness
-        ymin = max(0, min(1023, int(center - abs(wobble))))
-        ymax = max(0, min(1023, int(center + abs(wobble))))
+        # Peak-detect style: each column is min/max over a few noisy raw samples.
+        raw = [
+            ADC_CODE_MID
+            + amplitude * math.sin(2 * math.pi * freq_hz * (t + (i + k / SUBSAMPLES) / n_cols))
+            + random.gauss(0, NOISE_CODES)
+            for k in range(SUBSAMPLES)
+        ]
+        ymin = max(0, min(1023, round(min(raw))))
+        ymax = max(0, min(1023, round(max(raw))))
         payload += ymin.to_bytes(2, "little")
         payload += ymax.to_bytes(2, "little")
 
