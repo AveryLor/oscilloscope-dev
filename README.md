@@ -167,6 +167,12 @@ oscilloscope-gui --port /dev/ttyUSB0
 pytest                                   # includes the C-interop format check
 ```
 
+To try the GUI without hardware, stream a fake sine wave (needs `socat`):
+
+```bash
+./gui/tools/run-fake-scope.sh --freq 2 --amplitude 300
+```
+
 ## Branch protection (`main`)
 
 Direct pushes and force pushes to `main` are not allowed. Work on a branch and open a pull request:
