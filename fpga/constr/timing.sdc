@@ -11,10 +11,8 @@ create_clock -name spi_sclk -period 25.000 [get_ports {spi_sclk}]
 # Three unrelated domains: capture (fpga_clk / rPLL), housekeeping (clk27) and
 # SPI. adc_sample_clk is a generated clock off fpga_clk; Gowin derives it from
 # the rPLL primitive, so it travels with the fpga_clk group.
-set_clock_groups -asynchronous \
-    -group {fpga_clk} \
-    -group {clk27} \
-    -group {spi_sclk}
+# Single line: Gowin's SDC parser rejects backslash line continuations.
+set_clock_groups -asynchronous -group {fpga_clk} -group {clk27} -group {spi_sclk}
 
 # hw_trigger is an asynchronous input from J4; top.sv carries it through a
 # two-stage synchronizer (hw_trigger_q -> hw_trigger_sync).
