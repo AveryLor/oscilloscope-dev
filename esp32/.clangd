@@ -1,0 +1,6 @@
+CompileFlags:
+  CompilationDatabase: build
+  # Keep the host's /usr/include (glibc) out; the xtensa newlib headers come from --query-driver.
+  Add: [-nostdlibinc]
+  # GCC/xtensa-only flags from ESP-IDF that clang rejects
+  Remove: [-mlongcalls, -mtext-section-literals, -fstrict-volatile-bitfields, -fno-tree-switch-conversion, -fno-shrink-wrap, -fzero-init-padding-bits=*]
