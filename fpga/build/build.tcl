@@ -55,5 +55,8 @@ add_file [file join $project_root constr timing.sdc]
 set_option -top_module $top_name
 set_option -verilog_std sysv2017
 
+# adc_d[3], adc_d[4], adc_d[7] and fpga_flex[2] land on SSPI config pins.
+set_option -use_sspi_as_gpio 1
+
 run all
 run close

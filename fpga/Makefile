@@ -1,7 +1,7 @@
 # Tang Nano 20K FPGA build helpers
 # Requires: Gowin EDA (gw_sh) and openFPGALoader
 
-GW_SH          ?= gw_sh
+GW_SH          ?= $(or $(shell command -v gw_sh),$(HOME)/Desktop/IDE/bin/gw_sh)
 OPENFPGALOADER ?= openFPGALoader
 BOARD          ?= tangnano20k
 
@@ -15,7 +15,8 @@ BITSTREAM ?= $(shell find $(GOWIN_DIR) -name '*.fs' 2>/dev/null | head -n 1)
 .PHONY: build prog sim clean
 
 build:
-	cd $(PROJ_DIR) && $(GW_SH) build/build.tcl
+	# gw_sh is headless; point Qt at Gowin's bundled libs, not the system Qt.
+	cd $(PROJ_DIR) && LD_LIBRARY_PATH=$(dir $(GW_SH))../lib QT_QPA_PLATFORM=offscreen $(GW_SH) build/build.tcl
 
 prog:
 	@if [ -z "$(BITSTREAM)" ]; then \

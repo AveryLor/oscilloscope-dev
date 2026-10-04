@@ -26,34 +26,34 @@
  * Default 7-bit address is 0x60 (MCP4726A0).
  */
 
-#include <stdint.h>
-#include <stdbool.h>
-#include "esp_err.h"
 #include "driver/i2c_master.h"
+#include "esp_err.h"
+#include <stdbool.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 #define MCP4726_ADDR_DEFAULT 0x60
-#define MCP4726_CODE_MAX     0x0FFF
-#define MCP4726_CODE_MID     0x0800
+#define MCP4726_CODE_MAX 0x0FFF
+#define MCP4726_CODE_MID 0x0800
 
-// byte 0 bits 4..3 — reference source for "write volatile config" 
+// byte 0 bits 4..3 — reference source for "write volatile config"
 typedef enum {
-    MCP4726_VREF_VDD           = 0, // VDD, unbuffered (gain bit ignored) 
-    MCP4726_VREF_PIN_UNBUFFERED = 2,
-    MCP4726_VREF_PIN_BUFFERED   = 3,
+  MCP4726_VREF_VDD = 0, // VDD, unbuffered (gain bit ignored)
+  MCP4726_VREF_PIN_UNBUFFERED = 2,
+  MCP4726_VREF_PIN_BUFFERED = 3,
 } mcp4726_vref_t;
 
 // byte 0 bit 0 — output gain, only meaningful when VREF != VDD
 typedef enum {
-    MCP4726_GAIN_1X = 0,
-    MCP4726_GAIN_2X = 1,
+  MCP4726_GAIN_1X = 0,
+  MCP4726_GAIN_2X = 1,
 } mcp4726_gain_t;
 
 typedef struct {
-    i2c_master_dev_handle_t dev;
+  i2c_master_dev_handle_t dev;
 } mcp4726_dev_t;
 
 /*
@@ -62,10 +62,11 @@ typedef struct {
  * otherwise the device keeps its EEPROM-loaded configuration.
  */
 esp_err_t mcp4726_init(mcp4726_dev_t *dev, i2c_master_bus_handle_t bus,
-                       uint8_t addr, bool write_config,
-                       mcp4726_vref_t cfg_vref, mcp4726_gain_t cfg_gain);
+                       uint8_t addr, bool write_config, mcp4726_vref_t cfg_vref,
+                       mcp4726_gain_t cfg_gain);
 
-/* Fast write: update the volatile 12-bit DAC output (code clamped to 0..4095). */
+/* Fast write: update the volatile 12-bit DAC output (code clamped to 0..4095).
+ */
 esp_err_t mcp4726_set_code(mcp4726_dev_t *dev, uint16_t code12);
 
 #ifdef __cplusplus
