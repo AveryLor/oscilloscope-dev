@@ -30,7 +30,7 @@ flowchart LR
 | Block | Role |
 |-------|------|
 | **ESP32** | VGA, LNA DAC, relays, vertical knobs, SPI master, stream frozen captures over USB-UART |
-| **FPGA** | 105 Msps capture (`ADC_D*` + `FPGA_CLK`), SPI slave dump |
+| **FPGA** | 100 Msps capture (`ADC_D*` + `FPGA_CLK`), SPI slave dump |
 | **GUI** | Draws the trace, graticule and readout from the streamed captures; sends dial/toggle control commands back to the ESP32 |
 
 ## Pinout
@@ -102,7 +102,7 @@ flowchart LR
 | J7-15 | `ADC_D2` | 41 | `IOB43A` / LCD_R4 | Consecutive |
 | J7-16 | `ADC_D1` | 42 | `IOB42B` / LCD_R3 | Consecutive |
 | J7-17 | `ADC_D0` | 80 | `IOT27A` / SDIO_D2 | LSB |
-| J7-18 | `FPGA_CLK` | 76 | `IOT30B` / `GCLKC_1` | 105 MHz from PL133 via 30 Ω (`R51`) |
+| J7-18 | `FPGA_CLK` | 76 | `IOT30B` / `GCLKC_1` | 100 MHz from PL133 via 30 Ω (`R51`) |
 | J7-19 | GND | — | GND | Common ground |
 | J7-20 | 5V | — | 5V | Through Schottky `D12`; do not back-power blindly |
 
