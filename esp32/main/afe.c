@@ -98,7 +98,7 @@ static esp_err_t afe_i2c_init(void) {
     return err;
   }
   return mcp4726_init(&s_dac, s_i2c, MCP4726_ADDR_DEFAULT, true,
-                      MCP4726_VREF_VDD, MCP4726_GAIN_1X);
+                      MCP4726_VREF_PIN_BUFFERED, MCP4726_GAIN_1X);
 }
 
 esp_err_t afe_set(const afe_config_t *cfg) {
