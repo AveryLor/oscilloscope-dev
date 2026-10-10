@@ -1,6 +1,6 @@
 /*
  * File: timebase_decimator.sv
- * Description: Horizontal timebase. Reduces the 105 MSPS corrected sample stream
+ * Description: Horizontal timebase. Reduces the 100 MSPS corrected sample stream
  *              by an integer factor (cfg_dec_factor + 1). In plain mode it emits
  *              the last sample of each window. In peak-detect mode it emits two
  *              entries per window — the window minimum then the window maximum —

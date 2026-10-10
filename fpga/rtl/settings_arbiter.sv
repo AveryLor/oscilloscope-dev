@@ -19,7 +19,7 @@ module settings_arbiter
     parameter int LEVEL_STEP = 8,
     parameter int SPLIT_STEP = 64,
     parameter int ENC_DEBOUNCE = 400,
-    parameter int AUTO_TMO_DEFAULT = 10_500_000  // ~100 ms of 105 MHz ticks
+    parameter int AUTO_TMO_DEFAULT = 10_000_000  // ~100 ms of 100 MHz ticks
 ) (
     input  logic        clk,
     input  logic        rst_n,
