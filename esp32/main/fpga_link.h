@@ -15,6 +15,10 @@
 #include "esp_err.h"
 #include "scope_proto.h"
 
+// Capture buffer depth (capture_buffer.sv DEPTH). A SAMPLE_COUNT above this
+// can only come from a broken SPI link, e.g. MISO floating reads 0xFFFFFFFF.
+#define SCOPE_REC_MAX_SAMPLES 16384u
+
 // Acquisition parameters for one capture
 typedef struct {
     uint8_t  mode;          // MODE_NORMAL / MODE_AUTO / MODE_SINGLE

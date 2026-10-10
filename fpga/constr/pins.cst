@@ -62,10 +62,10 @@ IO_PORT "spi_sclk" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 IO_LOC  "spi_cs" 27;
 IO_PORT "spi_cs" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 
-IO_LOC  "spi_mosi" 28;
+IO_LOC  "spi_mosi" 25;
 IO_PORT "spi_mosi" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 
-IO_LOC  "spi_miso" 25;
+IO_LOC  "spi_miso" 28;
 IO_PORT "spi_miso" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8;
 
 // Capture-ready to ESP32 GPIO16. Active-high, idle low, so an unprogrammed or

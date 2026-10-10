@@ -1,6 +1,7 @@
 #include "stream.h"
 
 #include "driver/uart.h"
+#include "esp_rom_uart.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -16,6 +17,7 @@ static const char *TAG = "stream";
 #define STREAM_UART        UART_NUM_0
 #define STREAM_TX_BUF      (8 * 1024)
 #define CAPTURE_TIMEOUT_MS 1000
+#define READ_RETRY_MS      100
 
 static uint16_t s_ymin[STREAM_COLS];
 static uint16_t s_ymax[STREAM_COLS];
@@ -30,6 +32,9 @@ static esp_err_t stream_uart_init(void) {
         .flow_ctrl  = UART_HW_FLOWCTRL_DISABLE,
         .source_clk = UART_SCLK_DEFAULT,
     };
+    // Let the boot log drain at the console baud before switching, or its
+    // tail (including fpga_link's ready line) is garbled.
+    esp_rom_output_tx_wait_idle(0);
     esp_err_t err = uart_driver_install(STREAM_UART, 256, STREAM_TX_BUF, 0, NULL, 0);
     if (err != ESP_OK) {
         return err;
@@ -105,6 +110,9 @@ static void stream_task(void *arg) {
             continue;
         }
         if (scope_read_envelope(&env, STREAM_COLS) != ESP_OK) {
+            // A dead link reads STATUS as all ones, so scope_wait_ready passes
+            // instantly every time; sleep so this loop can't starve IDLE.
+            vTaskDelay(pdMS_TO_TICKS(READ_RETRY_MS));
             continue;
         }
 
