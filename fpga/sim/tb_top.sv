@@ -20,12 +20,12 @@ module tb_top;
     localparam int POST  = 32;
 
     logic clk = 0;        // 27 MHz housekeeping
-    logic fpga_clk = 0;   // 105 MHz encode clock
+    logic fpga_clk = 0;   // 100 MHz encode clock
     always #18 clk = ~clk;
     always #5  fpga_clk = ~fpga_clk;
 
-    logic [9:0] adc_d;
-    logic       adc_or;
+    logic [9:0] adc_d, adc_d_src;
+    logic       adc_or, adc_or_src;
     logic       spi_sclk, spi_cs, spi_mosi, spi_miso;
     logic       fpga_irq;
     logic       probe_comp;
@@ -35,7 +35,11 @@ module tb_top;
 
     adc_waveform_src #(.PERIOD(220)) u_src (
         .clk(fpga_clk), .rst_n(1'b1), .en(1'b1), .inject_spike(1'b0),
-        .adc_d(adc_d), .adc_or(adc_or));
+        .adc_d(adc_d_src), .adc_or(adc_or_src));
+
+    // AD9215 output delay: tOD = 4.8 ns typical after the encode edge.
+    assign #4.8 adc_d  = adc_d_src;
+    assign #4.8 adc_or = adc_or_src;
 
     spi_master_bfm #(.SCLK_NS(40.0)) mst (
         .sclk(spi_sclk), .cs_n(spi_cs), .mosi(spi_mosi), .miso(spi_miso));

@@ -2,7 +2,7 @@
  * File: top.sv
  * Description: Top-level RTL for the Tang Nano 20K oscilloscope FPGA design.
  *              Ties the ADC capture datapath (condition -> decimate -> trigger ->
- *              ring buffer -> acquisition FSM) in the 105 MHz sample domain to
+ *              ring buffer -> acquisition FSM) in the 100 MHz sample domain to
  *              the SPI slave register file and record readout in the SPI domain,
  *              with the encoders, probe-comp generator and capture-ready IRQ in
  *              the 27 MHz housekeeping domain. See docs/PROTOCOL.md for the SPI
