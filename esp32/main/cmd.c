@@ -8,6 +8,7 @@
 
 #include "afe.h"
 #include "cmd_parse.h"
+#include "deskew.h"
 #include "live_cfg.h"
 
 static const char *TAG = "cmd";
@@ -59,6 +60,9 @@ static void dispatch(const cmd_t *cmd) {
     case CMD_SET_TERM:
         s_afe_target.term_50r = cmd->as.term.term_50r;
         xQueueOverwrite(s_afe_queue, &s_afe_target);
+        break;
+    case CMD_CALIBRATE:
+        deskew_request();   // stream_task runs it between captures
         break;
     }
 }

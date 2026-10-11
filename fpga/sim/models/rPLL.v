@@ -52,12 +52,21 @@ module rPLL #(
     input  [3:0] FDLY
 );
 
-    // One 105 MHz period is ~9.524 ns; a "180 degree" PSDA_SEL of "1000" is
-    // ~4.76 ns. Model just enough delay for a phase-shifted capture edge.
-    localparam real PHASE_NS = 4.76;
+    // One 105 MHz period is ~9.524 ns, split into 16 PSDA steps of 22.5 deg.
+    // With DYN_DA_EN the shift follows the PSDA port; otherwise PSDA_SEL's
+    // "1000" (180 deg, ~4.76 ns) default. Model just enough delay for a
+    // phase-shifted capture edge; duty and glitches on a change are not modelled.
+    localparam real STEP_NS = 9.524 / 16.0;
+    localparam      DYN     = (DYN_DA_EN == "true");
+
+    real phase_ns = 8 * STEP_NS;
+    always @(*) phase_ns = (DYN ? PSDA : 4'd8) * STEP_NS;
+
+    reg clkoutp_r = 1'b0;
+    always @(CLKIN) clkoutp_r <= #(phase_ns) CLKIN;
 
     assign CLKOUT   = CLKIN;
-    assign #(PHASE_NS) CLKOUTP = CLKIN;
+    assign CLKOUTP  = clkoutp_r;
     assign CLKOUTD   = 1'b0;
     assign CLKOUTD3  = 1'b0;
 

@@ -23,6 +23,7 @@ typedef enum {
     CMD_SET_VERTICAL,
     CMD_SET_COUPLING,
     CMD_SET_TERM,
+    CMD_CALIBRATE,   // no fields: run ADC deskew calibration (deskew.h)
 } cmd_kind_t;
 
 typedef struct {

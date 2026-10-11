@@ -2,7 +2,9 @@
  * File: tb_config_cdc.sv
  * Description: config_cdc delivers new data to the destination only after the
  *              commit toggle crosses, pulses dst_update exactly once per commit,
- *              and leaves dst_data unchanged when no commit occurs.
+ *              and leaves dst_data unchanged when no commit occurs. Coming out of
+ *              reset the destination loads src_data once without a pulse, so a
+ *              destination-only reset does not lose the config.
  * Author: Avery Lor
  * Date: Aug 30 2026
  */
@@ -35,6 +37,7 @@ module tb_config_cdc;
         drst_n = 1;
         repeat (8) @(posedge dclk);
         `EXPECT_EQ(upd_count, 0, "no update before any commit");
+        `EXPECT_EQ(ddata, 16'hBEEF, "src_data loaded on reset release");
 
         // First commit.
         @(posedge sclk) sdata <= 16'h1234;
@@ -54,6 +57,16 @@ module tb_config_cdc;
         repeat (10) @(posedge dclk);
         `EXPECT_EQ(ddata, 16'h5555, "second commit crossed");
         `EXPECT_EQ(upd_count, 2, "two updates");
+
+        // Destination-only reset after the commit already crossed: the data
+        // must come back without another commit.
+        drst_n = 0;
+        repeat (2) @(posedge dclk);
+        `EXPECT_EQ(ddata, 16'h0000, "dst_data cleared in reset");
+        drst_n = 1;
+        repeat (8) @(posedge dclk);
+        `EXPECT_EQ(ddata, 16'h5555, "dst_data reloaded after a dst-only reset");
+        `EXPECT_EQ(upd_count, 2, "reload does not pulse dst_update");
 
         `TB_FINISH("tb_config_cdc");
     end

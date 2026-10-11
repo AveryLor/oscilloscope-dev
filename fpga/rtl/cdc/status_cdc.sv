@@ -7,7 +7,8 @@
  *              capture domain when the record freezes and are static afterwards.
  *              The SPI side must only trust the wide fields while the synced
  *              frozen flag is high, which it is guaranteed to be only after those
- *              fields have long since settled.
+ *              fields have long since settled. The eye-monitor counts follow
+ *              the same rule against the synced eye_done flag.
  * Author: Avery Lor
  * Date: Aug 30 2026
  */
@@ -28,6 +29,9 @@ module status_cdc
     input  logic [31:0] cap_trig_ptr,
     input  logic [15:0] cap_trig_phase,
     input  logic [15:0] cap_overrange_cnt,
+    input  logic        cap_eye_done,
+    input  logic [15:0] cap_eye_a,
+    input  logic [15:0] cap_eye_b,
 
     // SPI domain.
     input  logic        spi_clk,
@@ -46,6 +50,9 @@ module status_cdc
         src_bundle.trig_ptr          = cap_trig_ptr;
         src_bundle.trig_phase        = cap_trig_phase;
         src_bundle.overrange_cnt     = cap_overrange_cnt;
+        src_bundle.eye_done          = cap_eye_done;
+        src_bundle.eye_a             = cap_eye_a;
+        src_bundle.eye_b             = cap_eye_b;
     end
 
     logic [$bits(scope_sta_t)-1:0] src_flat, dst_flat;

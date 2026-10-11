@@ -71,6 +71,9 @@ package scope_pkg;
 
     // Status published from the capture domain back to the SPI register file.
     typedef struct packed {
+        logic [15:0] eye_b;             // eye monitor: edges after the sample
+        logic [15:0] eye_a;             // eye monitor: edges before the sample
+        logic        eye_done;          // eye window finished; eye_a/b static
         logic [15:0] overrange_cnt;     // over-range samples in the frozen record
         logic [15:0] trig_phase;        // decimation phase counter at the trigger
         logic [31:0] trig_ptr;          // trigger sample offset within the record

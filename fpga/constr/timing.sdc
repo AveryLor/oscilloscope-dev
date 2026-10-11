@@ -34,9 +34,12 @@ set_false_path -to   [get_ports {probe_comp fpga_irq}]
 #   max = AD9215 t_PD(max) + ADC->FPGA trace delay
 #   min = AD9215 t_PD(min) + ADC->FPGA trace delay
 #
-# t_PD from the AD9215 datasheet, trace delay from the Altium layout. These
-# also set where the PSDA_SEL sample phase in fpga/rtl/adc_pll.v should sit:
-# the eye opens at max and closes at 9.524 + min, so aim for the midpoint.
+# t_PD from the AD9215 datasheet, trace delay from the Altium layout. The
+# sample phase itself is no longer fixed here: PLL_PHASE and the per-lane
+# IODELAY taps are set at runtime by the ESP32's deskew calibration
+# (docs/PROTOCOL.md "ADC deskew"), so these constraints only bound the analysis.
+# PLL_PHASE and the IODELAY step controls come from clk27 registers into the
+# rPLL / IOLOGIC control pins; they are quasi-static and need no constraint.
 #
 # set_input_delay -clock fpga_clk -max <max> [get_ports {adc_d[*] adc_or}]
 # set_input_delay -clock fpga_clk -min <min> [get_ports {adc_d[*] adc_or}]

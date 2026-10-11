@@ -77,8 +77,8 @@ address holds the least-significant byte.
 | 0x00 | `ID0` | RO | `'S'` | magic |
 | 0x01 | `ID1` | RO | `'C'` | magic |
 | 0x02 | `VER_MAJ` | RO | 1 | protocol major |
-| 0x03 | `VER_MIN` | RO | 0 | protocol minor |
-| 0x04 | `CAPS` | RO | build | b0 peak-detect, b1 ext-trig, b2 SDRAM (0 in v1), b3 built with `SAMPLE_DEPTH=32768` |
+| 0x03 | `VER_MIN` | RO | 1 | protocol minor (1 = ADC deskew registers present) |
+| 0x04 | `CAPS` | RO | build | b0 peak-detect, b1 ext-trig, b2 SDRAM (0 in v1), b3 built with `SAMPLE_DEPTH=32768`, b4 ADC deskew |
 | 0x05..0x06 | `BUF_DEPTH` | RO | `SAMPLE_DEPTH` | sample capacity, 16-bit LE |
 | 0x08 | `CONTROL` | RW | 0x00 | see below |
 | 0x09 | `MODE` | RW | 0x00 | b1:0 mode (0 NORMAL / 1 AUTO / 2 SINGLE), b2 peak-detect enable |
@@ -102,6 +102,13 @@ address holds the least-significant byte.
 | 0x36 | `ENC_BTN` | RO | 0 | b0 hs level, b1 hs event, b2 ho level, b3 ho event, b4 tg level, b5 tg event; event bits clear on read |
 | 0x40 | `REC_DATA` | RO | - | pop one record byte (no address increment) |
 | 0x41 | `REC_STATUS` | RO | - | b0 fifo_empty, b1 record_done, b2 underflow |
+| 0x50 | `PLL_PHASE` | RW | 8 | b3:0 ADC sample-clock phase, 22.5 deg per step (8 = 180 deg); see "ADC deskew" |
+| 0x51..0x5A | `DLY_TAP_D0..D9` | RW | 0 | b6:0 IODELAY tap for `adc_d[n]` |
+| 0x5B | `DLY_TAP_OR` | RW | 0 | b6:0 IODELAY tap for `adc_or` |
+| 0x5C | `DESKEW_STATUS` | RO | - | b0 tap stepper busy, b1 eye window done |
+| 0x5D | `EYE_CTL` | RW | 0 | b3:0 eye-monitor lane (0..9 = `adc_d[n]`, 10 = `adc_or`), b7 W1 start a window |
+| 0x60..0x61 | `EYE_A` | RO | - | edges in the half period before the sample, 16-bit LE |
+| 0x62..0x63 | `EYE_B` | RO | - | edges in the half period after the sample, 16-bit LE |
 
 ### `CONTROL` bits (0x08)
 
@@ -163,6 +170,66 @@ positioning on slow timebases.
 If `ARM` is written while a dump is still in progress, the FPGA finishes handing
 the record across (drains the readout FIFO) before it clears `frozen` and resumes
 writing. The host may safely `ARM` immediately after the last `REC_DATA` read.
+
+## ADC deskew
+
+The ten AD9215 data bits and `OR` reach the FPGA on traces of different
+lengths, across three IO banks, so they do not all change at the same moment.
+One sample edge cannot sit in the middle of every bit's valid window, and a
+bit sampled near its transition tears the word (e.g. half of a 511 -> 512 step
+captured). The FPGA has two controls and one measurement for this:
+
+| Piece | Where | What it does |
+|-------|-------|--------------|
+| `PLL_PHASE` | rPLL dynamic phase (`fpga/rtl/adc_pll.v`) | moves the sample edge for **all** lanes, 16 steps of ~595 ps |
+| `DLY_TAP_*` | one IODELAY per pad (`fpga/rtl/adc_deskew.sv`) | delays **one** lane, 128 taps |
+| `EYE_CTL` / `EYE_A` / `EYE_B` | `fpga/rtl/adc_eye_monitor.sv` | shows where one lane's edges fall |
+
+Each pad is sampled on both clock edges (IDDR). The rising sample is the data;
+the falling sample, half a period later, only feeds the eye monitor. Over a
+65536-cycle window (~624 us) the monitor counts, for the selected lane, edges
+between the previous falling sample and the rising sample (`EYE_A`) and edges
+between the rising sample and the next falling one (`EYE_B`). As a lane's tap
+grows its edges move later. **The tap where the counts swing from B to A puts
+the edge on the falling sample, so the rising sample is mid-eye: that is the
+target.** The A -> B swing is the edge sitting on the rising sample, the worst
+place. The lane has to toggle for this to work: a few-MHz sine close to full
+scale toggles every bit; the probe-comp square does not.
+
+Rules:
+
+- **Writing `PLL_PHASE` resets the capture domain** for ~2.3 us (the PLL
+  output may glitch while the phase moves). The acquisition FSM drops to IDLE
+  and the eye monitor clears `done`; the config is kept. Re-arm afterwards.
+- The IODELAY moves one tap per step, so a `DLY_TAP_*` write takes up to
+  ~19 us to land; poll `DESKEW_STATUS.busy`. A lane glitches while it steps.
+- Only trust `EYE_A` / `EYE_B` while `DESKEW_STATUS.eye_done` is 1. Like the
+  record fields, they are static from then until the next start.
+
+The ESP32 runs the calibration (`esp32/main/deskew.c`, host command
+`CALIBRATE` in `docs/CONTROL.md`):
+
+```
+for each PLL_PHASE 0..15:
+    for tap = 0, 4, ..., 124:  write all DLY_TAP_* = tap, wait !busy
+        for each lane: write EYE_CTL = lane | START, wait eye_done, read EYE_A/B
+    per lane: the B->A crossover tap, if any
+pick the phase that finds the most lanes, then the one best centred (tap 64)
+refine each lane +/-4 taps in steps of 1 at that phase
+lanes that never toggled (normally OR) or found nothing get the median tap
+write PLL_PHASE + DLY_TAP_*, save to NVS
+```
+
+The result is saved in the ESP32's NVS and re-applied at every boot before the
+first arm.
+
+Bring-up checks (they cannot be checked in simulation):
+
+- `iodelay_stepper.sv`'s `SETN_INC` / `SDTAP_LOAD` polarities and the IDDR
+  `Q0` = rising / `Q1` = falling pairing come from Gowin UG289. If a sweep
+  shows A -> B where B -> A is expected everywhere, one of them is flipped.
+- `adc_pll.v` drives `DUTYDA = PSDA + 8` for a 50% duty cycle. Confirm against
+  UG286 with a scope on a spare pin if in doubt.
 
 ## Peak-detect (`MODE.b2`)
 

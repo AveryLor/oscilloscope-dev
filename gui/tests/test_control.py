@@ -1,4 +1,4 @@
-"""Table-driven checks that the six SET_* formatters produce exactly the wire
+"""Table-driven checks that the six SET_* formatters and CALIBRATE produce exactly the wire
 grammar esp32/main/cmd_parse.c expects (docs/CONTROL.md), and reject anything
 outside the range the firmware accepts. See esp32/test/test_cmd_parse.c for
 the matching decode-side tests."""
@@ -70,3 +70,7 @@ def test_fmt_set_coupling():
 def test_fmt_set_term():
     assert control.fmt_set_term(True) == "SET_TERM 1"
     assert control.fmt_set_term(False) == "SET_TERM 0"
+
+
+def test_fmt_calibrate():
+    assert control.fmt_calibrate() == "CALIBRATE"

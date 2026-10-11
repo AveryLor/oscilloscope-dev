@@ -4,7 +4,10 @@
  *              triangle ADC source feed top; the SPI master BFM configures a
  *              force-only / AUTO capture, arms it, waits for fpga_irq, then reads
  *              STATUS, SAMPLE_COUNT and a run of REC_DATA and checks the record
- *              is the right length and decodes to in-range codes.
+ *              is the right length and decodes to in-range codes. Then moves
+ *              the PLL phase, checks lock and the config survive the
+ *              capture-domain reset by capturing again, sets an IODELAY tap and
+ *              runs one eye-monitor window.
  * Author: Avery Lor
  * Date: Aug 30 2026
  */
@@ -141,6 +144,56 @@ module tb_top;
         reg_write(7'h08, 8'h20);           // CONTROL.IRQ_CLR
         repeat (20) @(posedge clk); #1;
         `EXPECT_EQ(fpga_irq, 1'b0, "fpga_irq cleared after IRQ_CLR");
+
+        // ---- Deskew ------------------------------------------------------
+        // A PLL phase change resets the capture domain; the config must be
+        // re-sent so a fresh capture still has PRE + POST samples.
+        reg_write(7'(REG_PLL_PHASE), 8'd4);
+        #5000;
+        reg_read(7'(REG_PLL_PHASE), d);
+        `EXPECT_EQ(d, 8'd4, "PLL_PHASE reads back");
+        reg_read(7'h20, d);
+        `EXPECT(d[STAT_PLL_LOCK_BIT] === 1'b1, "PLL still locked after a phase change");
+
+        reg_write(7'h08, 8'h01);           // arm
+        fork
+            begin : wait_irq2
+                @(posedge fpga_irq);
+            end
+            begin : irq_timeout2
+                #500000;
+                `EXPECT(1'b0, "timed out waiting for fpga_irq after phase change");
+            end
+        join_any
+        disable irq_timeout2;
+        disable wait_irq2;
+        n = 0;
+        reg_read(7'h21, d); n = n | (d << 0);
+        reg_read(7'h22, d); n = n | (d << 8);
+        `EXPECT_EQ(n, PRE + POST, "config survived the phase-change reset");
+
+        reg_write(7'(REG_DLY_TAP_D0) + 7'd2, 8'd20);
+        for (int t = 0; t < 50; t++) begin
+            reg_read(7'(REG_DESKEW_STATUS), d);
+            if (!d[DSKST_BUSY_BIT]) break;
+            #2000;
+        end
+        `EXPECT_EQ(d[DSKST_BUSY_BIT], 1'b0, "IODELAY stepper settles");
+        reg_read(7'(REG_DLY_TAP_D0) + 7'd2, d);
+        `EXPECT_EQ(d, 8'd20, "DLY_TAP_D2 reads back");
+
+        // Eye window on lane 0 (the LSB toggles constantly on the triangle).
+        reg_write(7'(REG_EYE_CTL), 8'h80);
+        #700000;
+        reg_read(7'(REG_DESKEW_STATUS), d);
+        `EXPECT_EQ(d[DSKST_EYE_DONE_BIT], 1'b1, "eye window completes");
+        reg_read(7'(REG_EYE_A_L), lo);
+        reg_read(7'(REG_EYE_A_H), hi);
+        n = {hi, lo};
+        reg_read(7'(REG_EYE_B_L), lo);
+        reg_read(7'(REG_EYE_B_H), hi);
+        n = n + {hi, lo};
+        `EXPECT(n > 0, "eye monitor counted lane 0 edges");
 
         `TB_FINISH("tb_top");
     end

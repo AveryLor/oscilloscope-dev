@@ -141,5 +141,11 @@ bool cmd_parse_line(const char *line, size_t len, cmd_t *out) {
         return true;
     }
 
+    if (token_is(kw, kw_len, "CALIBRATE")) {
+        if (!parse_fields(p, end, NULL, 0, v)) return false;
+        out->kind = CMD_CALIBRATE;
+        return true;
+    }
+
     return false; // unknown keyword
 }

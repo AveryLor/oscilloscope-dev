@@ -48,6 +48,7 @@ no signs, no whitespace runs, no trailing garbage after the last field.
 | `SET_VERTICAL` | `atten` `preamp` `lmh_atten` `offset_code` | u8(0-2) u8(0-1) u8(0-10) u16(0-4095) | `afe_set()` |
 | `SET_COUPLING` | `mode` | u8(0=AC 1=DC) | `afe_set()` |
 | `SET_TERM` | `mode` | u8(0=1MOhm 1=50Ohm) | `afe_set()` |
+| `CALIBRATE` | none | - | `deskew_calibrate()`: ADC deskew, see `docs/PROTOCOL.md` "ADC deskew" |
 
 `src`: 0 = level, 1 = ext, 2 = force. `edge`: 0 = rising, 1 = falling, 2 =
 either. `preamp`: 0 = low gain (18.8 dB), 1 = high gain (38.8 dB). `atten`: 0
@@ -63,7 +64,14 @@ SET_TRIGGER 512 0 0 8
 SET_VERTICAL 1 0 4 2048
 SET_COUPLING 1
 SET_TERM 0
+CALIBRATE
 ```
+
+`CALIBRATE` is a one-off per board, not a live control. Apply a few-MHz sine
+close to full scale first, so every ADC bit toggles. The stream pauses for the
+~10 s sweep, which runs between captures in `stream_task`, then resumes. The
+result is saved to NVS and re-applied at boot. Like every other command it
+gets no reply. If no lane found an eye, the FPGA is left at its defaults.
 
 ## Why plain text, not a binary/CRC frame
 

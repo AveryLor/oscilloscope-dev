@@ -69,11 +69,26 @@ localparam logic [6:0]
     REG_REC_DATA       = 7'h40,   // RO  record FIFO pop (no address increment)
     REG_REC_STATUS     = 7'h41;   // RO  record FIFO status
 
+// ADC capture deskew. PLL_PHASE moves the sample edge for every lane; DLY_TAP_*
+// delay one lane each through its pad IODELAY. The eye monitor measures where
+// the selected lane's edges fall relative to the sample clock. See
+// docs/PROTOCOL.md "ADC deskew".
+localparam logic [6:0]
+    REG_PLL_PHASE      = 7'h50,   // RW  [3:0] rPLL PSDA, 22.5 deg per step
+    REG_DLY_TAP_D0     = 7'h51,   // RW  [6:0] IODELAY tap, adc_d[0]
+    REG_DLY_TAP_OR     = 7'h5B,   // RW  [6:0] IODELAY tap, adc_or (D0..D9 = 0x51..0x5A)
+    REG_DESKEW_STATUS  = 7'h5C,   // RO  stepper busy + eye done
+    REG_EYE_CTL        = 7'h5D,   // RW  lane select + start
+    REG_EYE_A_L        = 7'h60,   // RO  edges before the sample, 16-bit LE
+    REG_EYE_A_H        = 7'h61,
+    REG_EYE_B_L        = 7'h62,   // RO  edges after the sample, 16-bit LE
+    REG_EYE_B_H        = 7'h63;
+
 // Reset / identification values.
 localparam logic [7:0] SCOPE_ID0_VAL     = 8'h53; // 'S'
 localparam logic [7:0] SCOPE_ID1_VAL     = 8'h43; // 'C'
 localparam logic [7:0] SCOPE_VER_MAJ_VAL = 8'h01;
-localparam logic [7:0] SCOPE_VER_MIN_VAL = 8'h00;
+localparam logic [7:0] SCOPE_VER_MIN_VAL = 8'h01;
 
 // CONTROL (0x08). Bits marked W1 are write-1 one-shots that self-clear.
 localparam int CTRL_ARM_BIT        = 0; // W1  arm the acquisition engine
@@ -118,11 +133,25 @@ localparam int RECST_FIFO_EMPTY_BIT = 0;
 localparam int RECST_DONE_BIT       = 1;
 localparam int RECST_UNDERFLOW_BIT  = 2;
 
+// Deskew lanes: adc_d[0..9] are lanes 0..9, adc_or is lane 10.
+localparam int DESKEW_LANES      = 11;
+localparam int DESKEW_TAP_W      = 7;   // IODELAY taps 0..127
+localparam logic [3:0] PLL_PHASE_DEFAULT = 4'd8;  // 180 deg
+
+// DESKEW_STATUS (0x5C).
+localparam int DSKST_BUSY_BIT     = 0;  // IODELAY stepper still moving a lane
+localparam int DSKST_EYE_DONE_BIT = 1;  // eye window finished, EYE_A/B valid
+
+// EYE_CTL (0x5D).
+localparam int EYECTL_SEL_LSB   = 0;    // [3:0] lane, 0..10
+localparam int EYECTL_START_BIT = 7;    // W1  start a 65536-cycle eye window
+
 // CAPS (0x04).
 localparam int CAPS_PEAK_BIT    = 0;    // peak-detect decimation present
 localparam int CAPS_EXTTRIG_BIT = 1;    // external hw_trigger present
 localparam int CAPS_SDRAM_BIT   = 2;    // deep SDRAM buffer present (0 in v1)
 localparam int CAPS_32K_BIT     = 3;    // built with SAMPLE_DEPTH = 32768
+localparam int CAPS_DESKEW_BIT  = 4;    // PLL phase / IODELAY / eye monitor present
 
 // Byte past the end of the record reads back as this value.
 localparam logic [7:0] SCOPE_REC_PAD = 8'hFF;

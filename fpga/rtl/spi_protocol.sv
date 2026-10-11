@@ -33,6 +33,10 @@ module spi_protocol
     input  scope_cfg_t  cfg_rb,
     input  logic [15:0] probe_div_rb,
     input  logic        probe_en_rb,
+    input  logic [3:0]  pll_phase_rb,
+    input  logic [DESKEW_LANES*DESKEW_TAP_W-1:0] dly_tap_rb,
+    input  logic [3:0]  eye_sel_rb,
+    input  logic        dly_busy,
     input  logic [7:0]  caps,
     input  logic [15:0] buf_depth,
 
@@ -150,7 +154,19 @@ module spi_protocol
             7'(REG_ENC_BTN):         reg_rd = {2'b0, enc_btn};
             7'(REG_REC_DATA):        reg_rd = rec_byte;
             7'(REG_REC_STATUS):      reg_rd = {5'b0, rec_underflow, rec_done, 1'b0};
-            default:                 reg_rd = 8'h00;
+            7'(REG_PLL_PHASE):       reg_rd = {4'b0, pll_phase_rb};
+            7'(REG_DESKEW_STATUS):   reg_rd = {6'b0, sta.eye_done, dly_busy};
+            7'(REG_EYE_CTL):         reg_rd = {4'b0, eye_sel_rb};
+            7'(REG_EYE_A_L):         reg_rd = sta.eye_a[7:0];
+            7'(REG_EYE_A_H):         reg_rd = sta.eye_a[15:8];
+            7'(REG_EYE_B_L):         reg_rd = sta.eye_b[7:0];
+            7'(REG_EYE_B_H):         reg_rd = sta.eye_b[15:8];
+            default: begin
+                if (a >= 7'(REG_DLY_TAP_D0) && a <= 7'(REG_DLY_TAP_OR))
+                    reg_rd = {1'b0, dly_tap_rb[(a - 7'(REG_DLY_TAP_D0)) * DESKEW_TAP_W +: DESKEW_TAP_W]};
+                else
+                    reg_rd = 8'h00;
+            end
         endcase
     endfunction
 

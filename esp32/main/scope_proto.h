@@ -71,11 +71,22 @@
 #define REG_REC_DATA        0x40u
 #define REG_REC_STATUS      0x41u
 
+// ADC deskew (docs/PROTOCOL.md "ADC deskew").
+#define REG_PLL_PHASE       0x50u
+#define REG_DLY_TAP_D0      0x51u   // D0..D9 = 0x51..0x5A
+#define REG_DLY_TAP_OR      0x5Bu
+#define REG_DESKEW_STATUS   0x5Cu
+#define REG_EYE_CTL         0x5Du
+#define REG_EYE_A_L         0x60u
+#define REG_EYE_A_H         0x61u
+#define REG_EYE_B_L         0x62u
+#define REG_EYE_B_H         0x63u
+
 // Identification.
 #define SCOPE_ID0_VAL     0x53u // 'S'
 #define SCOPE_ID1_VAL     0x43u // 'C'
 #define SCOPE_VER_MAJ_VAL 0x01u
-#define SCOPE_VER_MIN_VAL 0x00u
+#define SCOPE_VER_MIN_VAL 0x01u
 
 // CONTROL (0x08). W1 bits self-clear in the FPGA.
 #define CTRL_ARM         (1u << 0) // W1
@@ -134,6 +145,22 @@
 #define CAPS_EXTTRIG  (1u << 1)
 #define CAPS_SDRAM    (1u << 2)
 #define CAPS_32K      (1u << 3)
+#define CAPS_DESKEW   (1u << 4)
+
+// PLL_PHASE (0x50): rPLL PSDA, 22.5 deg per step; resets to 180 deg.
+#define PLL_PHASE_MASK     0x0Fu
+#define PLL_PHASE_DEFAULT  8u
+
+// DLY_TAP_* (0x51..0x5B): IODELAY tap 0..127 for one lane.
+#define DLY_TAP_MASK       0x7Fu
+
+// DESKEW_STATUS (0x5C).
+#define DSKST_BUSY      (1u << 0)  // IODELAY stepper still moving a lane
+#define DSKST_EYE_DONE  (1u << 1)  // eye window finished, EYE_A/B valid
+
+// EYE_CTL (0x5D).
+#define EYECTL_SEL_MASK 0x0Fu      // lane 0..10 (10 = adc_or)
+#define EYECTL_START    (1u << 7)  // W1  start a 65536-cycle window
 
 // A read past the end of the record returns this byte.
 #define SCOPE_REC_PAD 0xFFu

@@ -3,7 +3,8 @@
  * Description: settings_arbiter applies host register writes to the effective
  *              config, turns a CONTROL write-1 bit into a command pulse, applies
  *              a trigger-encoder detent as a LEVEL_STEP change to trig_level, and
- *              flips commit_tog on every change.
+ *              flips commit_tog on every change. Also covers the deskew
+ *              registers (PLL phase, per-lane taps, eye start pulse).
  * Author: Avery Lor
  * Date: Aug 30 2026
  */
@@ -30,6 +31,9 @@ module tb_settings_arbiter;
     logic        cmd_arm, cmd_abort, cmd_force, cmd_irq_clr, cmd_soft_reset;
     logic [15:0] enc_hs, enc_ho, enc_tg;
     logic [5:0]  enc_btn;
+    logic [3:0]  pll_phase, eye_sel;
+    logic [DESKEW_LANES*DESKEW_TAP_W-1:0] dly_tap;
+    logic        eye_start;
     always #5 clk = ~clk;
 
     settings_arbiter #(.DEPTH(16384), .LEVEL_STEP(8), .ENC_DEBOUNCE(2)) dut (
@@ -41,6 +45,8 @@ module tb_settings_arbiter;
         .enc_btn_clr(enc_btn_clr),
         .cfg_o(cfg), .probe_div_o(probe_div), .probe_en_o(probe_en),
         .commit_tog(commit_tog),
+        .pll_phase_o(pll_phase), .dly_tap_o(dly_tap),
+        .eye_sel_o(eye_sel), .eye_start_o(eye_start),
         .cmd_arm(cmd_arm), .cmd_abort(cmd_abort), .cmd_force(cmd_force),
         .cmd_irq_clr(cmd_irq_clr), .cmd_soft_reset(cmd_soft_reset),
         .enc_hs_cnt(enc_hs), .enc_ho_cnt(enc_ho), .enc_tg_cnt(enc_tg),
@@ -63,6 +69,8 @@ module tb_settings_arbiter;
 
     integer arm_count = 0;
     always @(posedge clk) if (cmd_arm) arm_count = arm_count + 1;
+    integer eye_start_count = 0;
+    always @(posedge clk) if (eye_start) eye_start_count = eye_start_count + 1;
 
     logic ct0;
     logic [9:0] lvl0;
@@ -94,6 +102,23 @@ module tb_settings_arbiter;
         tg_detent_fwd();
         repeat (4) @(posedge clk); #1;
         `EXPECT_EQ(cfg.trig_level, lvl0 + 10'd8, "detent bumped trig_level by LEVEL_STEP");
+
+        // Deskew registers.
+        `EXPECT_EQ(pll_phase, PLL_PHASE_DEFAULT, "PLL phase resets to 180 deg");
+        host_write(7'(REG_PLL_PHASE), 8'hF5);
+        host_write(7'(REG_DLY_TAP_D0) + 7'd3, 8'hFF);    // 7-bit field: 127
+        host_write(7'(REG_DLY_TAP_OR), 8'd42);
+        repeat (2) @(posedge clk); #1;
+        `EXPECT_EQ(pll_phase, 4'd5, "PLL_PHASE takes the low nibble");
+        `EXPECT_EQ(dly_tap[3*DESKEW_TAP_W +: DESKEW_TAP_W], 7'd127, "DLY_TAP_D3 written");
+        `EXPECT_EQ(dly_tap[10*DESKEW_TAP_W +: DESKEW_TAP_W], 7'd42, "DLY_TAP_OR written");
+        `EXPECT_EQ(dly_tap[2*DESKEW_TAP_W +: DESKEW_TAP_W], 7'd0, "neighbouring lane untouched");
+
+        eye_start_count = 0;
+        host_write(7'(REG_EYE_CTL), 8'h80 | 8'd7);
+        repeat (2) @(posedge clk); #1;
+        `EXPECT_EQ(eye_sel, 4'd7, "EYE_CTL lane select");
+        `EXPECT_EQ(eye_start_count, 1, "EYE_CTL start is a single pulse");
 
         `TB_FINISH("tb_settings_arbiter");
     end

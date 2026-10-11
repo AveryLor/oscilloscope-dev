@@ -6,7 +6,9 @@
  *              authoritative config (last writer wins). Any change registers the
  *              new value and, one cycle later, flips commit_tog so the config
  *              crossers re-sample settled data. CONTROL write-1 bits become
- *              single-cycle command pulses.
+ *              single-cycle command pulses. The ADC deskew registers (PLL phase,
+ *              IODELAY taps, eye-monitor control) live here too; only the host
+ *              writes them.
  * Author: Avery Lor
  * Date: Aug 30 2026
  */
@@ -41,6 +43,12 @@ module settings_arbiter
     output logic [15:0] probe_div_o,
     output logic        probe_en_o,
     output logic        commit_tog,
+
+    // ADC deskew.
+    output logic [3:0]  pll_phase_o,
+    output logic [DESKEW_LANES*DESKEW_TAP_W-1:0] dly_tap_o,
+    output logic [3:0]  eye_sel_o,
+    output logic        eye_start_o,     // pulse
 
     // Command pulses (HK domain).
     output logic        cmd_arm,
@@ -100,6 +108,9 @@ module settings_arbiter
     logic        invert_r;
     logic [15:0] probe_div_r;
     logic        probe_en_r;
+    logic [3:0]  pll_phase_r;
+    logic [DESKEW_TAP_W-1:0] dly_tap_r [DESKEW_LANES];
+    logic [3:0]  eye_sel_r;
 
     logic signed [15:0] hs_prev, ho_prev, tg_prev;
     logic               changed;
@@ -120,6 +131,16 @@ module settings_arbiter
     end
     assign probe_div_o = probe_div_r;
     assign probe_en_o  = probe_en_r;
+    assign pll_phase_o = pll_phase_r;
+    assign eye_sel_o   = eye_sel_r;
+    always_comb begin
+        for (int i = 0; i < DESKEW_LANES; i++)
+            dly_tap_o[i*DESKEW_TAP_W +: DESKEW_TAP_W] = dly_tap_r[i];
+    end
+
+    // DLY_TAP_D0..D9, DLY_TAP_OR are one contiguous block.
+    wire       wr_is_tap  = (wr_addr >= 7'(REG_DLY_TAP_D0)) && (wr_addr <= 7'(REG_DLY_TAP_OR));
+    wire [6:0] wr_tap_ix  = wr_addr - 7'(REG_DLY_TAP_D0);
 
     // Signed helpers for encoder-driven adjustments.
     function automatic logic [9:0] clamp_level(input logic signed [31:0] v);
@@ -150,6 +171,10 @@ module settings_arbiter
             invert_r      <= 1'b0;
             probe_div_r   <= 16'd0;
             probe_en_r    <= 1'b1;
+            pll_phase_r   <= PLL_PHASE_DEFAULT;
+            for (int i = 0; i < DESKEW_LANES; i++) dly_tap_r[i] <= '0;
+            eye_sel_r     <= 4'd0;
+            eye_start_o   <= 1'b0;
             hs_prev       <= '0;
             ho_prev       <= '0;
             tg_prev       <= '0;
@@ -166,6 +191,7 @@ module settings_arbiter
             cmd_force      <= 1'b0;
             cmd_irq_clr    <= 1'b0;
             cmd_soft_reset <= 1'b0;
+            eye_start_o    <= 1'b0;
             wr_pop         <= 1'b0;
             changed         = 1'b0;
 
@@ -209,7 +235,18 @@ module settings_arbiter
                     7'(REG_PROBE_DIV_L):  begin probe_div_r[7:0]  <= wr_data;    changed = 1'b1; end
                     7'(REG_PROBE_DIV_H):  begin probe_div_r[15:8] <= wr_data;    changed = 1'b1; end
                     7'(REG_PROBE_CTL):    begin probe_en_r    <= wr_data[PROBE_EN_BIT]; changed = 1'b1; end
-                    default: ; // read-only or unmapped
+                    7'(REG_PLL_PHASE):    begin pll_phase_r   <= wr_data[3:0];   changed = 1'b1; end
+                    7'(REG_EYE_CTL): begin
+                        eye_sel_r   <= wr_data[EYECTL_SEL_LSB +: 4];
+                        eye_start_o <= wr_data[EYECTL_START_BIT];
+                        changed      = 1'b1;
+                    end
+                    default: begin
+                        if (wr_is_tap) begin
+                            dly_tap_r[wr_tap_ix[3:0]] <= wr_data[DESKEW_TAP_W-1:0];
+                            changed = 1'b1;
+                        end
+                    end
                 endcase
             end
 

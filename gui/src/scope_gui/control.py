@@ -1,5 +1,5 @@
-"""Host -> ESP32 control commands: formats the six SET_* lines documented in
-docs/CONTROL.md and matched by esp32/main/cmd_parse.c, plus a small debounce
+"""Host -> ESP32 control commands: formats the six SET_* lines and CALIBRATE
+documented in docs/CONTROL.md and matched by esp32/main/cmd_parse.c, plus a small debounce
 helper so a dragged slider doesn't flood the link with one line per pixel.
 
 The fmt_set_*() functions validate their own ranges before formatting, ahead
@@ -52,6 +52,11 @@ def fmt_set_coupling(dc_coupled: bool) -> str:
 
 def fmt_set_term(term_50r: bool) -> str:
     return f"SET_TERM {1 if term_50r else 0}"
+
+
+def fmt_calibrate() -> str:
+    """One-shot ADC deskew calibration; needs a busy full-scale input applied."""
+    return "CALIBRATE"
 
 
 class DebouncedSender:

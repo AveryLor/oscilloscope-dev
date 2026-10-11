@@ -102,6 +102,15 @@ static void valid_coupling_and_term(void) {
     check(!parse("SET_TERM 2", &c), "SET_TERM rejects out-of-range mode");
 }
 
+static void valid_calibrate(void) {
+    cmd_t c;
+    check(parse("CALIBRATE", &c) && c.kind == CMD_CALIBRATE, "CALIBRATE parses");
+    check(parse("  CALIBRATE  ", &c) && c.kind == CMD_CALIBRATE,
+          "CALIBRATE tolerates surrounding spaces");
+    check(!parse("CALIBRATE 1", &c), "CALIBRATE rejects a field");
+    check(!parse("CALIBRATEX", &c), "CALIBRATE prefix is not a match");
+}
+
 static void malformed_lines_are_rejected(void) {
     cmd_t c;
     check(!parse("", &c), "empty line rejected");
@@ -144,6 +153,7 @@ int main(void) {
     valid_trigger();
     valid_vertical();
     valid_coupling_and_term();
+    valid_calibrate();
     malformed_lines_are_rejected();
     crlf_is_tolerated();
     never_reads_past_the_given_length();

@@ -6,6 +6,7 @@
 #include "freertos/task.h"
 
 #include "afe.h"
+#include "deskew.h"
 #include "fpga_link.h"
 #include "live_cfg.h"
 #include "scope_proto.h"
@@ -94,6 +95,15 @@ static void stream_task(void *arg) {
     uint32_t seq = 0;
 
     for (;;) {
+        if (deskew_take_request()) {
+            // Runs here, not in cmd.c, so the sweep never races a capture.
+            // It resets the capture domain, so re-arm with the live config.
+            (void)deskew_calibrate(NULL);
+            scope_acq_cfg_t acq;
+            live_cfg_get_acq(&acq);
+            (void)scope_arm(&acq);
+            continue;
+        }
         if (scope_wait_ready(CAPTURE_TIMEOUT_MS) != ESP_OK) {
             // No capture within the window: re-arm rather than wedging, in
             // case an IRQ edge was lost. Re-read live_cfg first so the re-arm

@@ -4,7 +4,8 @@
  *              turnaround byte and ID/VERSION values, little-endian multi-byte
  *              config read-back from a stubbed effective-config bundle, that
  *              writes emit host_wr strobes with an auto-incrementing address, and
- *              that a REC_DATA burst pops the record stream in order.
+ *              that a REC_DATA burst pops the record stream in order, and the
+ *              deskew register block (PLL phase, taps, status, eye counts).
  * Author: Avery Lor
  * Date: Aug 30 2026
  */
@@ -35,6 +36,12 @@ module tb_spi_protocol;
     logic        irq_level = 1'b0;
     logic [15:0] probe_div_rb = 16'h0000;
     logic        probe_en_rb  = 1'b1;
+    logic [DESKEW_LANES*DESKEW_TAP_W-1:0] dly_tap_rb;
+    initial begin
+        dly_tap_rb = '0;
+        for (int l = 0; l < DESKEW_LANES; l++)
+            dly_tap_rb[l*DESKEW_TAP_W +: DESKEW_TAP_W] = 7'(10 + l);
+    end
 
     initial begin
         sta = '0;
@@ -42,6 +49,9 @@ module tb_spi_protocol;
         cfg_rb.trig_level = 10'h123;  // L=0x23, H=0x01
         cfg_rb.dec_factor = 16'hABCD;
         cfg_rb.mode       = 2'd2;
+        sta.eye_done      = 1'b1;
+        sta.eye_a         = 16'h1234;
+        sta.eye_b         = 16'hBEEF;
     end
 
     // Stub record bridge: rec_byte increments on each byte-boundary advance,
@@ -70,6 +80,7 @@ module tb_spi_protocol;
         .rx_byte(rx_byte), .rx_stb(rx_stb), .bit_pos(bit_pos), .tx_byte(tx_byte),
         .sta(sta), .irq_level(irq_level), .cfg_rb(cfg_rb),
         .probe_div_rb(probe_div_rb), .probe_en_rb(probe_en_rb),
+        .pll_phase_rb(4'd9), .dly_tap_rb(dly_tap_rb), .eye_sel_rb(4'd6), .dly_busy(1'b1),
         .caps(8'h0B), .buf_depth(16'd16384),
         .enc_hs_cnt(16'd0), .enc_ho_cnt(16'd0), .enc_tg_cnt(16'd0),
         .enc_btn(6'd0), .enc_btn_rd(enc_btn_rd),
@@ -90,7 +101,7 @@ module tb_spi_protocol;
         mst.xfer_byte(8'h00, d); `EXPECT_EQ(d, 8'h53, "ID0 = 'S'");
         mst.xfer_byte(8'h00, d); `EXPECT_EQ(d, 8'h43, "ID1 = 'C'");
         mst.xfer_byte(8'h00, d); `EXPECT_EQ(d, 8'h01, "VER_MAJ = 1");
-        mst.xfer_byte(8'h00, d); `EXPECT_EQ(d, 8'h00, "VER_MIN = 0");
+        mst.xfer_byte(8'h00, d); `EXPECT_EQ(d, 8'h01, "VER_MIN = 1");
         mst.cs_hi();
 
         // --- Read TRIG_LEVEL_L/H (little-endian 0x123) ---
@@ -122,6 +133,28 @@ module tb_spi_protocol;
             mst.xfer_byte(8'h00, d);
             `EXPECT_EQ(d, 8'h10 + i, "record byte in order");
         end
+        mst.cs_hi();
+
+        // --- Deskew block: PLL_PHASE, then DLY_TAP_D0..OR in one burst ---
+        mst.cs_lo();
+        mst.xfer_byte(8'h80 | 7'(REG_PLL_PHASE), d);
+        mst.xfer_byte(8'h00, d);                       // turnaround
+        mst.xfer_byte(8'h00, d); `EXPECT_EQ(d, 8'd9, "PLL_PHASE read-back");
+        for (i = 0; i < DESKEW_LANES; i = i + 1) begin
+            mst.xfer_byte(8'h00, d);
+            `EXPECT_EQ(d, 8'(10 + i), "DLY_TAP lane read-back");
+        end
+        mst.xfer_byte(8'h00, d); `EXPECT_EQ(d, 8'h03, "DESKEW_STATUS busy + eye_done");
+        mst.xfer_byte(8'h00, d); `EXPECT_EQ(d, 8'h06, "EYE_CTL lane read-back");
+        mst.cs_hi();
+
+        mst.cs_lo();
+        mst.xfer_byte(8'h80 | 7'(REG_EYE_A_L), d);
+        mst.xfer_byte(8'h00, d);
+        mst.xfer_byte(8'h00, d); `EXPECT_EQ(d, 8'h34, "EYE_A_L");
+        mst.xfer_byte(8'h00, d); `EXPECT_EQ(d, 8'h12, "EYE_A_H");
+        mst.xfer_byte(8'h00, d); `EXPECT_EQ(d, 8'hEF, "EYE_B_L");
+        mst.xfer_byte(8'h00, d); `EXPECT_EQ(d, 8'hBE, "EYE_B_H");
         mst.cs_hi();
 
         `TB_FINISH("tb_spi_protocol");

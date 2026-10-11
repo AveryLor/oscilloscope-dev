@@ -312,6 +312,15 @@ class MainWindow(QMainWindow):
         self.term_checkbox.toggled.connect(self._on_term_changed)
         ct_form.addRow(self.dc_checkbox)
         ct_form.addRow(self.term_checkbox)
+        # ADC deskew is a one-off per board, saved on the ESP32; it needs a
+        # few-MHz near-full-scale sine on the input to see every bit toggle.
+        self.calibrate_btn = QPushButton("Calibrate ADC timing")
+        self.calibrate_btn.setToolTip(
+            "Apply a few-MHz sine near full scale, then click. Takes ~10 s; "
+            "the trace pauses meanwhile. The result is saved on the device."
+        )
+        self.calibrate_btn.clicked.connect(self._on_calibrate_clicked)
+        ct_form.addRow(self.calibrate_btn)
         col.addWidget(ct_group)
 
         col.addStretch(1)
@@ -320,7 +329,7 @@ class MainWindow(QMainWindow):
             self.dec_factor_spin, self.pre_spin, self.post_spin,
             self.level_slider, self.src_combo, self.edge_combo, self.hyst_spin,
             self.atten_combo, self.preamp_combo, self.lmh_atten_spin, self.offset_slider,
-            self.dc_checkbox, self.term_checkbox,
+            self.dc_checkbox, self.term_checkbox, self.calibrate_btn,
         ]
 
         dock.setWidget(panel)
@@ -433,6 +442,9 @@ class MainWindow(QMainWindow):
 
     def _on_term_changed(self, term_50r: bool) -> None:
         self._deb_term.submit(control.fmt_set_term(term_50r))
+
+    def _on_calibrate_clicked(self) -> None:
+        self._send(control.fmt_calibrate())
 
     def _sync_controls_from_frame(self, f: Frame) -> None:
         # Only fields the sample stream actually carries (see docs/STREAM.md)

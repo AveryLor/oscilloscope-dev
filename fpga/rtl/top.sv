@@ -47,7 +47,10 @@ module top
         (8'b0
          | (8'b1 << CAPS_PEAK_BIT)
          | (8'b1 << CAPS_EXTTRIG_BIT)
+         | (8'b1 << CAPS_DESKEW_BIT)
          | ((SAMPLE_DEPTH == 32768) ? (8'b1 << CAPS_32K_BIT) : 8'b0));
+
+    localparam int TAPS_W = DESKEW_LANES * DESKEW_TAP_W;
 
     // fpga_flex[2:0] are spare trigger-mezzanine lines, reserved.
     wire _flex_unused = |{1'b0, fpga_flex};
@@ -55,9 +58,11 @@ module top
     // ---- Clocking and reset ---------------------------------------------------
     logic adc_sample_clk;
     logic pll_lock;
+    logic [3:0] pll_phase_hk;   // PLL_PHASE register, from settings_arbiter
 
     adc_pll u_adc_pll (
         .clkin   (fpga_clk),
+        .psda    (pll_phase_hk),
         .clkoutp (adc_sample_clk),
         .lock    (pll_lock)
     );
@@ -71,22 +76,59 @@ module top
     logic pll_lock_hk;
     cdc_bit_sync #(.WIDTH(1)) u_pll_lock_hk (.clk(clk), .d(pll_lock), .q(pll_lock_hk));
 
+    // A PLL_PHASE change can glitch adc_sample_clk, so hold the capture domain
+    // in reset for PHASE_HOLD housekeeping cycles (~2.3 us) after each change.
+    // config_cdc reloads the capture-side config as the domain comes back up.
+    localparam int PHASE_HOLD = 63;
+    logic [3:0] pll_phase_prev;
+    logic [5:0] phase_hold;
+    logic       phase_quiet;
+
+    always_ff @(posedge clk or negedge rst_hk_n) begin
+        if (!rst_hk_n) begin
+            pll_phase_prev <= PLL_PHASE_DEFAULT;
+            phase_hold     <= '0;
+            phase_quiet    <= 1'b1;
+        end else begin
+            pll_phase_prev <= pll_phase_hk;
+            if (pll_phase_prev != pll_phase_hk) phase_hold <= 6'(PHASE_HOLD);
+            else if (phase_hold != 0)           phase_hold <= phase_hold - 6'd1;
+            phase_quiet <= (phase_hold == 0) && (pll_phase_prev == pll_phase_hk);
+        end
+    end
+
     logic cap_arst_n, rst_cap_n;
-    assign cap_arst_n = por_n & pll_lock_hk;
+    assign cap_arst_n = por_n & pll_lock_hk & phase_quiet;
     reset_sync u_rst_cap (.clk(adc_sample_clk), .arst_n(cap_arst_n), .rst_n(rst_cap_n));
 
-    // ---- ADC input path: IOLOGIC pad registers ------------------------------
-    // VIN+ / VIN- are swapped on the analog front end; adc_input_cond corrects
-    // the codes around mid-scale when cfg.invert_en is set.
-    (* syn_useioff = 1, syn_keep = "true" *) logic [9:0] adc_d_q;
-    (* syn_useioff = 1, syn_keep = "true" *) logic       adc_or_q;
-    (* syn_useioff = 1, syn_keep = "true" *) logic       hw_trigger_q;
+    // ---- ADC input path: IODELAY + IDDR in each pad's IOLOGIC ---------------
+    // adc_deskew lines the lanes up (per-lane IODELAY) and samples each on both
+    // clock edges. The rising samples are the data; the falling samples only
+    // feed the eye monitor. VIN+ / VIN- are swapped on the analog front end;
+    // adc_input_cond corrects the codes around mid-scale when cfg.invert_en is
+    // set. pll_lock gating is done downstream on the capture-buffer write.
+    logic [DESKEW_LANES-1:0] lane_rise, lane_fall;
+    logic [TAPS_W-1:0]       dly_tap_hk;
+    logic                    dly_busy_hk;
 
-    // Unconditional so these stay packed in IOLOGIC. pll_lock gating is done
-    // downstream on the capture-buffer write, not here.
+    adc_deskew u_deskew (
+        .pad_in   ({adc_or, adc_d}),
+        .cap_clk  (adc_sample_clk),
+        .rise_q   (lane_rise),
+        .fall_q   (lane_fall),
+        .hk_clk   (clk),
+        .hk_rst_n (rst_hk_n),
+        .tap_tgt  (dly_tap_hk),
+        .busy     (dly_busy_hk)
+    );
+
+    logic [9:0] adc_d_q;
+    logic       adc_or_q;
+    assign adc_d_q  = lane_rise[9:0];
+    assign adc_or_q = lane_rise[10];
+
+    (* syn_useioff = 1, syn_keep = "true" *) logic hw_trigger_q;
     always_ff @(posedge adc_sample_clk) begin
-        adc_d_q      <= adc_d;
-        adc_or_q     <= adc_or;
         hw_trigger_q <= hw_trigger;
     end
 
@@ -109,6 +151,8 @@ module top
     logic [7:0]  hw_wr_data;
     logic        hw_wr_pop;
     logic        enc_btn_clr_hk;
+    logic [3:0]  eye_sel_hk;
+    logic        eye_start_hk;
 
     settings_arbiter #(.DEPTH(SAMPLE_DEPTH)) u_settings (
         .clk         (clk),
@@ -125,6 +169,10 @@ module top
         .probe_div_o (probe_div_hk),
         .probe_en_o  (probe_en_hk),
         .commit_tog  (commit_tog_hk),
+        .pll_phase_o (pll_phase_hk),
+        .dly_tap_o   (dly_tap_hk),
+        .eye_sel_o   (eye_sel_hk),
+        .eye_start_o (eye_start_hk),
         .cmd_arm     (cmd_arm),
         .cmd_abort   (cmd_abort),
         .cmd_force   (cmd_force),
@@ -194,24 +242,31 @@ module top
         .dst_update (cfg_update_cap)
     );
 
-    localparam int RB_W = $bits(scope_cfg_t) + 16 + 1;
+    localparam int RB_W = $bits(scope_cfg_t) + 16 + 1 + 4 + TAPS_W + 4;
     scope_cfg_t      cfg_rb_spi;
     logic [15:0]     probe_div_spi;
     logic            probe_en_spi;
+    logic [3:0]      pll_phase_spi;
+    logic [TAPS_W-1:0] dly_tap_spi;
+    logic [3:0]      eye_sel_spi;
     logic            rb_update_spi;
     logic [RB_W-1:0] rb_flat_spi;
 
     config_cdc #(.WIDTH(RB_W)) u_cfg_to_spi (
-        .src_data   ({cfg_hk_flat, probe_div_hk, probe_en_hk}),
+        .src_data   ({cfg_hk_flat, probe_div_hk, probe_en_hk,
+                      pll_phase_hk, dly_tap_hk, eye_sel_hk}),
         .src_commit (commit_tog_hk),
         .dst_clk    (spi_sclk),
         .dst_rst_n  (por_n),
         .dst_data   (rb_flat_spi),
         .dst_update (rb_update_spi)
     );
-    assign cfg_rb_spi    = rb_flat_spi[RB_W-1 -: $bits(scope_cfg_t)];
-    assign probe_div_spi = rb_flat_spi[16:1];
-    assign probe_en_spi  = rb_flat_spi[0];
+    assign {cfg_rb_spi, probe_div_spi, probe_en_spi,
+            pll_phase_spi, dly_tap_spi, eye_sel_spi} = rb_flat_spi;
+
+    logic dly_busy_spi;
+    cdc_bit_sync #(.WIDTH(1)) u_dlybusy_spi (
+        .clk(spi_sclk), .d(dly_busy_hk), .q(dly_busy_spi));
 
     // ---- Capture datapath (adc_sample_clk domain) -----------------------------
     logic [9:0] cond_sample;
@@ -358,6 +413,31 @@ module top
         .src_clk(clk), .src_rst_n(rst_hk_n), .src_pulse(rearm_req_hk),
         .dst_clk(adc_sample_clk), .dst_rst_n(rst_cap_n), .dst_pulse(rearm_ack_cap));
 
+    // ---- Eye monitor (capture domain) -----------------------------------
+    // The lane select is static while a window runs, so a plain synchroniser
+    // carries it; the monitor's SETTLE cycles cover it landing after start.
+    logic [3:0]  eye_sel_cap;
+    logic        eye_start_cap, eye_done_cap;
+    logic [15:0] eye_a_cap, eye_b_cap;
+
+    cdc_bit_sync #(.WIDTH(4)) u_eyesel_cap (
+        .clk(adc_sample_clk), .d(eye_sel_hk), .q(eye_sel_cap));
+    cdc_pulse_toggle u_eye_start (
+        .src_clk(clk), .src_rst_n(rst_hk_n), .src_pulse(eye_start_hk),
+        .dst_clk(adc_sample_clk), .dst_rst_n(rst_cap_n), .dst_pulse(eye_start_cap));
+
+    adc_eye_monitor #(.N(DESKEW_LANES)) u_eye (
+        .clk    (adc_sample_clk),
+        .rst_n  (rst_cap_n),
+        .start  (eye_start_cap),
+        .sel    (eye_sel_cap),
+        .rise_q (lane_rise),
+        .fall_q (lane_fall),
+        .done   (eye_done_cap),
+        .a_cnt  (eye_a_cap),
+        .b_cnt  (eye_b_cap)
+    );
+
     // ---- Status crossing CAP -> SPI --------------------------------------
     scope_sta_t sta_spi;
 
@@ -372,6 +452,9 @@ module top
         .cap_trig_ptr      (32'(buf_rec_trig_off)),
         .cap_trig_phase    (trig_phase_q),
         .cap_overrange_cnt (buf_overrange_cnt),
+        .cap_eye_done      (eye_done_cap),
+        .cap_eye_a         (eye_a_cap),
+        .cap_eye_b         (eye_b_cap),
         .spi_clk           (spi_sclk),
         .spi_sta           (sta_spi)
     );
@@ -451,6 +534,10 @@ module top
         .cfg_rb       (cfg_rb_spi),
         .probe_div_rb (probe_div_spi),
         .probe_en_rb  (probe_en_spi),
+        .pll_phase_rb (pll_phase_spi),
+        .dly_tap_rb   (dly_tap_spi),
+        .eye_sel_rb   (eye_sel_spi),
+        .dly_busy     (dly_busy_spi),
         .caps         (CAPS_VALUE),
         .buf_depth    (16'(SAMPLE_DEPTH)),
         .enc_hs_cnt   (enc_hs_spi),
