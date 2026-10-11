@@ -116,6 +116,10 @@ class Link:
 
     def close(self) -> None:
         self._stop.set()
+        # Let the reader's in-flight read() time out before the fd goes away;
+        # closing under it makes pyserial call os.read(None, ...).
+        if threading.current_thread() is not self._thread:
+            self._thread.join(timeout=1.0)
         try:
             self._serial.close()
         except serial.SerialException:
@@ -134,6 +138,9 @@ class Link:
                 data = self._serial.read(4096)
             except serial.SerialException as exc:
                 self._push(DisconnectedEvent(str(exc)))
+                return
+            except TypeError:
+                # Port was closed under us (fd is None); only expected on close().
                 return
             if not data:
                 continue

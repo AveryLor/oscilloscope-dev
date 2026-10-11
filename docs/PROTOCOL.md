@@ -25,7 +25,7 @@ Change one, change all three.
 | CS | active low, idle high | one frame per CS assertion |
 | IRQ | active high, idle low | ESP32 uses an internal pull-down + posedge ISR |
 
-`spi_sclk` is treated as fully asynchronous to the 105 MHz capture clock
+`spi_sclk` is treated as fully asynchronous to the 100 MHz capture clock
 (`set_clock_groups -asynchronous`).
 
 ## Framing

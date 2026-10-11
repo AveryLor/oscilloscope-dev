@@ -86,8 +86,8 @@ class Frame:
     cols: tuple[tuple[int, int], ...]  # (ymin, ymax) codes, one pair per column
 
     def sample_period(self) -> float:
-        """Seconds per sample, from the 105 MHz encode clock and decimation."""
-        return (self.dec_factor + 1) / 105_000_000.0
+        """Seconds per sample, from the 100 MHz encode clock and decimation."""
+        return (self.dec_factor + 1) / 100_000_000.0
 
     def duration(self) -> float:
         return self.sample_count * self.sample_period()

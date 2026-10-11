@@ -1,6 +1,7 @@
 #include "stream.h"
 
 #include "driver/uart.h"
+#include "esp_rom_uart.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -16,6 +17,7 @@ static const char *TAG = "stream";
 #define STREAM_UART        UART_NUM_0
 #define STREAM_TX_BUF      (8 * 1024)
 #define CAPTURE_TIMEOUT_MS 1000
+#define READ_RETRY_MS      100
 
 static uint16_t s_ymin[STREAM_COLS];
 static uint16_t s_ymax[STREAM_COLS];
@@ -30,6 +32,9 @@ static esp_err_t stream_uart_init(void) {
         .flow_ctrl  = UART_HW_FLOWCTRL_DISABLE,
         .source_clk = UART_SCLK_DEFAULT,
     };
+    // Let the boot log drain at the console baud before switching, or its
+    // tail (including fpga_link's ready line) is garbled.
+    esp_rom_output_tx_wait_idle(0);
     esp_err_t err = uart_driver_install(STREAM_UART, 256, STREAM_TX_BUF, 0, NULL, 0);
     if (err != ESP_OK) {
         return err;
@@ -52,10 +57,12 @@ static uint8_t afe_flags_of(const afe_config_t *afe) {
 static void stream_task(void *arg) {
     (void)arg;
 
-    // Free-running AUTO capture: the FPGA re-arms itself after every dump, so
-    // the host sees a live trace without asking for each one. The AUTO timeout
+    // Free-running AUTO capture: this task re-arms after every dump, so the
+    // host sees a live trace without asking for each one. The AUTO timeout
     // means an idle input still produces frames instead of waiting forever for
-    // an edge that never comes.
+    // an edge that never comes. FPGA auto-rearm stays off: its rearm handshake
+    // loops straight back in top.sv, so the buffer restarts (rec_count -> 0)
+    // a few clocks after freezing, long before the ESP32 can read the record.
     const scope_acq_cfg_t initial = {
         .mode         = MODE_AUTO,
         .peak_detect  = false,
@@ -68,7 +75,7 @@ static void stream_task(void *arg) {
         .post_count   = 1024,
         .auto_timeout = 1000000,
         .invert_en    = true,
-        .auto_rearm   = true,
+        .auto_rearm   = false,
     };
 
     // live_cfg owns the shared mirror of this config from here on: stream.c
@@ -105,14 +112,19 @@ static void stream_task(void *arg) {
             continue;
         }
         if (scope_read_envelope(&env, STREAM_COLS) != ESP_OK) {
+            // A dead link reads STATUS as all ones, so scope_wait_ready passes
+            // instantly every time; sleep so this loop can't starve IDLE.
+            vTaskDelay(pdMS_TO_TICKS(READ_RETRY_MS));
             continue;
         }
 
         scope_acq_cfg_t acq;
         live_cfg_get_acq(&acq);
 
+        // STATUS describes the frozen record, so read it before re-arming.
         uint8_t status = 0;
         (void)fpga_link_read8(REG_STATUS, &status);
+        (void)scope_arm(&acq);
 
         afe_config_t afe;
         afe_get(&afe);
@@ -139,6 +151,13 @@ static void stream_task(void *arg) {
         size_t len = stream_build_frame(s_frame, sizeof(s_frame), &meta,
                                         s_ymin, s_ymax, STREAM_COLS);
         if (len > 0) {
+            // Captures can arrive faster than 921600 baud drains them. Once the
+            // TX ring buffer is full, uart_write_bytes busy-spins instead of
+            // blocking, starving IDLE until the task WDT fires and prints its
+            // backtrace straight into the middle of a frame. Blocking here
+            // until the previous frame is out keeps the CPU free and means the
+            // next capture is read fresh rather than queued stale.
+            uart_wait_tx_done(STREAM_UART, portMAX_DELAY);
             uart_write_bytes(STREAM_UART, (const char *)s_frame, len);
         }
     }

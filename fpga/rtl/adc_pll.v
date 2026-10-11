@@ -1,6 +1,6 @@
 /*
  * File: adc_pll.v
- * Description: rPLL locked 1:1 to the 105 MHz ADC encode clock, CLKOUTP phase
+ * Description: rPLL locked 1:1 to the 100 MHz ADC encode clock, CLKOUTP phase
  *              shifted to sample the AD9215 bus mid-eye rather than at its
  *              transition edge. See PSDA_SEL below.
  * Author: Avery Lor
@@ -38,19 +38,27 @@ module adc_pll (
         .FDLY({gw_gnd, gw_gnd, gw_gnd, gw_gnd})
     );
 
-    defparam rpll_inst.FCLKIN = "105";
+    defparam rpll_inst.FCLKIN = "100";
     defparam rpll_inst.DYN_IDIV_SEL = "false";
     defparam rpll_inst.IDIV_SEL = 0;
     defparam rpll_inst.DYN_FBDIV_SEL = "false";
     defparam rpll_inst.FBDIV_SEL = 0;
     defparam rpll_inst.DYN_ODIV_SEL = "false";
     defparam rpll_inst.ODIV_SEL = 8;
-    // Sample-phase shift, 4 bits of 22.5 deg steps. "1000" = 180 deg = 4.76 ns
-    // at 9.524 ns. PROVISIONAL: this is the conventional source-synchronous
-    // starting point, not a derived value. Centre it properly before trusting
-    // captured data — the eye opens at t_PD_max and closes at period+t_PD_min
-    // (AD9215 datasheet, plus ADC->FPGA trace delay); target the midpoint, and
-    // on a tie take the step with more margin against t_PD_max.
+    // Sample-phase shift, 4 bits of 22.5 deg steps (0.625 ns at 10 ns).
+    // All times below are from the fpga_clk rising edge at the FPGA pin.
+    //   Data at the pad flop D (AD9215BCP-105 Table 4 tOD, timing.sdc
+    //   input delays, + 0.675 ns input buffer from the Gowin timing report):
+    //     word N settled   at 7.0 + 0.675       =  7.68 ns
+    //     word N+1 starts  at 10 + 2.5 + 0.675  = 13.18 ns
+    //   Eye midpoint 10.43 ns.
+    //   CLKOUTP reaches the pad flops 5.16 ns after fpga_clk at 0 deg
+    //   (3.65 ns PLL + 1.51 ns route, Gowin timing report). So the phase
+    //   that centres the edge is 10.43 - 5.16 = 5.27 ns = ~190 deg.
+    //     "1000" (180 deg)   edge at 10.16 ns: 2.49 ns setup, 3.01 ns hold margin
+    //     "1001" (202.5 deg) edge at 10.79 ns: 3.11 ns setup, 2.39 ns hold margin
+    // "1000" has the larger worst-case margin. Re-check against the timing
+    // report after any change to placement, and with a bench phase sweep.
     defparam rpll_inst.PSDA_SEL = "1000";
     defparam rpll_inst.DYN_DA_EN = "false";
     defparam rpll_inst.DUTYDA_SEL = "1000";

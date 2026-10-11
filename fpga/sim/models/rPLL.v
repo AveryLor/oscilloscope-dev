@@ -12,7 +12,7 @@
 `timescale 1ns/1ps
 
 module rPLL #(
-    parameter FCLKIN            = "105",
+    parameter FCLKIN            = "100",
     parameter DYN_IDIV_SEL      = "false",
     parameter IDIV_SEL          = 0,
     parameter DYN_FBDIV_SEL     = "false",
@@ -52,12 +52,23 @@ module rPLL #(
     input  [3:0] FDLY
 );
 
-    // One 105 MHz period is ~9.524 ns; a "180 degree" PSDA_SEL of "1000" is
-    // ~4.76 ns. Model just enough delay for a phase-shifted capture edge.
-    localparam real PHASE_NS = 4.76;
+    // CLKOUTP lags CLKIN by PSDA_SEL * 22.5 deg of one 100 MHz period
+    // (10 ns). PSDA_SEL is a 4-char "0"/"1" string, MSB first.
+    localparam integer PSDA_STEPS = ((PSDA_SEL[31:24] == "1") ? 8 : 0)
+                                  + ((PSDA_SEL[23:16] == "1") ? 4 : 0)
+                                  + ((PSDA_SEL[15:8]  == "1") ? 2 : 0)
+                                  + ((PSDA_SEL[7:0]   == "1") ? 1 : 0);
+    // Plus the PLL + clock-route insertion delay to the ADC pad flops that the
+    // Gowin timing report shows (3.65 ns PLL + 1.51 ns route).
+    localparam real INSERTION_NS = 5.163;
+    localparam real PHASE_NS = INSERTION_NS + 10.0 * PSDA_STEPS / 16.0;
 
     assign CLKOUT   = CLKIN;
-    assign #(PHASE_NS) CLKOUTP = CLKIN;
+    // Transport delay: PHASE_NS exceeds half a period, which an inertial
+    // `assign #` delay would swallow.
+    reg clkoutp_r = 1'b0;
+    always @(CLKIN) clkoutp_r <= #(PHASE_NS) CLKIN;
+    assign CLKOUTP = clkoutp_r;
     assign CLKOUTD   = 1'b0;
     assign CLKOUTD3  = 1'b0;
 
