@@ -219,11 +219,19 @@ esp_err_t scope_arm(const scope_acq_cfg_t *cfg) {
 }
 
 esp_err_t scope_wait_ready(uint32_t timeout_ms) {
+  // fpga_irq is a latched level held until CTRL_IRQ_CLR, so a line that is
+  // already high means a record is ready even though no new edge will come
+  // (e.g. scope_arm dropped the give because the capture beat it).
+  if (gpio_get_level(PIN_FPGA_IRQ)) {
+    return ESP_OK;
+  }
   if (xSemaphoreTake(s_irq_sem, pdMS_TO_TICKS(timeout_ms)) != pdTRUE) {
-    // Fall back to a status poll in case the edge was missed.
+    // Fall back to a status poll in case the edge was missed. With auto-rearm
+    // the FSM leaves FROZEN one cycle after freezing, so the latched IRQ bit is
+    // the only reliable sign of a completed capture.
     uint8_t status = 0;
     if (fpga_link_read8(REG_STATUS, &status) == ESP_OK &&
-        (status & STAT_FROZEN)) {
+        (status & (STAT_FROZEN | STAT_IRQ))) {
       return ESP_OK;
     }
     return ESP_ERR_TIMEOUT;
