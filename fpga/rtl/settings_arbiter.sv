@@ -19,7 +19,9 @@ module settings_arbiter
     parameter int LEVEL_STEP = 8,
     parameter int SPLIT_STEP = 64,
     parameter int ENC_DEBOUNCE = 400,
-    parameter int AUTO_TMO_DEFAULT = 10_000_000  // ~100 ms of 100 MHz ticks
+    parameter int AUTO_TMO_DEFAULT = 10_000_000, // ~100 ms of 100 MHz ticks
+    parameter bit HIRES_AVAIL    = 1'b0,  // CIC high-res decimator is built in
+    parameter bit INVERT_DEFAULT = 1'b0   // reset value of CONTROL.INVERT_EN
 ) (
     input  logic        clk,
     input  logic        rst_n,
@@ -48,6 +50,7 @@ module settings_arbiter
     output logic        cmd_force,
     output logic        cmd_irq_clr,
     output logic        cmd_soft_reset,
+    output logic        cmd_alarm_clr,   // ALARM_CTL.OR_CLR write-1
 
     // Encoder read-back (HK domain; top crosses these to SPI).
     output logic [15:0] enc_hs_cnt,
@@ -88,6 +91,10 @@ module settings_arbiter
     // ---- Config registers -------------------------------------------------
     logic [1:0]  mode_r;
     logic        peak_r;
+    logic        hires_r;
+    logic [4:0]  or_win_r;
+    logic [7:0]  or_thr_r;
+    logic        hs_lvl_d;   // previous HS button level, for press detection
     logic [1:0]  tsrc_r;
     logic [1:0]  tedge_r;
     logic [9:0]  tlevel_r;
@@ -107,6 +114,9 @@ module settings_arbiter
     always_comb begin
         cfg_o.mode         = mode_r;
         cfg_o.peak_en      = peak_r;
+        cfg_o.hires_en     = hires_r;
+        cfg_o.or_win       = or_win_r;
+        cfg_o.or_thr       = or_thr_r;
         cfg_o.invert_en    = invert_r;
         cfg_o.auto_rearm   = auto_rearm_r;
         cfg_o.trig_src     = tsrc_r;
@@ -138,6 +148,10 @@ module settings_arbiter
         if (!rst_n) begin
             mode_r        <= 2'd0;
             peak_r        <= 1'b0;
+            hires_r       <= 1'b0;
+            or_win_r      <= 5'(OR_WIN_DEFAULT);
+            or_thr_r      <= 8'(OR_THR_DEFAULT);
+            hs_lvl_d      <= 1'b0;
             tsrc_r        <= 2'd0;
             tedge_r       <= 2'd0;
             tlevel_r      <= 10'h200;
@@ -147,7 +161,7 @@ module settings_arbiter
             post_r        <= CW'(DEPTH/2);
             tmo_r         <= 32'(AUTO_TMO_DEFAULT);
             auto_rearm_r  <= 1'b0;
-            invert_r      <= 1'b0;
+            invert_r      <= INVERT_DEFAULT;
             probe_div_r   <= 16'd0;
             probe_en_r    <= 1'b1;
             hs_prev       <= '0;
@@ -160,12 +174,14 @@ module settings_arbiter
             cmd_force      <= 1'b0;
             cmd_irq_clr    <= 1'b0;
             cmd_soft_reset <= 1'b0;
+            cmd_alarm_clr  <= 1'b0;
         end else begin
             cmd_arm        <= 1'b0;
             cmd_abort      <= 1'b0;
             cmd_force      <= 1'b0;
             cmd_irq_clr    <= 1'b0;
             cmd_soft_reset <= 1'b0;
+            cmd_alarm_clr  <= 1'b0;
             wr_pop         <= 1'b0;
             changed         = 1'b0;
 
@@ -186,6 +202,10 @@ module settings_arbiter
                     7'(REG_MODE): begin
                         mode_r  <= wr_data[1:0];
                         peak_r  <= wr_data[MODE_PEAK_BIT];
+                        // High-res only exists if built in, and peak wins
+                        // if a host sets both.
+                        hires_r <= HIRES_AVAIL && wr_data[MODE_HIRES_BIT]
+                                   && !wr_data[MODE_PEAK_BIT];
                         changed  = 1'b1;
                     end
                     7'(REG_TRIG_CFG): begin
@@ -198,6 +218,9 @@ module settings_arbiter
                     7'(REG_TRIG_HYST):    begin thyst_r       <= wr_data;        changed = 1'b1; end
                     7'(REG_DEC_FACTOR_L): begin dec_r[7:0]    <= wr_data;        changed = 1'b1; end
                     7'(REG_DEC_FACTOR_H): begin dec_r[15:8]   <= wr_data;        changed = 1'b1; end
+                    7'(REG_OR_WIN):       begin or_win_r      <= wr_data[4:0];   changed = 1'b1; end
+                    7'(REG_OR_THR):       begin or_thr_r      <= wr_data;        changed = 1'b1; end
+                    7'(REG_ALARM_CTL):    begin cmd_alarm_clr <= wr_data[ALARMCTL_OR_CLR_BIT]; end
                     7'(REG_PRE_COUNT_L):  begin pre_r[7:0]    <= wr_data;        changed = 1'b1; end
                     7'(REG_PRE_COUNT_H):  begin pre_r[15:8]   <= wr_data;        changed = 1'b1; end
                     7'(REG_POST_COUNT_L): begin post_r[7:0]   <= wr_data;        changed = 1'b1; end
@@ -243,6 +266,23 @@ module settings_arbiter
                     pre_r   <= clamp_cnt($signed({12'd0, pre_r}) - SPLIT_STEP);
                     post_r  <= clamp_cnt($signed({12'd0, post_r}) + SPLIT_STEP);
                     ho_prev <= ho_prev - 16'sd1;
+                end
+                changed = 1'b1;
+            end
+
+            // Horizontal-scale button: each press cycles the acquisition
+            // type sample -> peak -> high-res (if built) -> sample. Placed
+            // after the host-write decode so a press in the same cycle as a
+            // MODE write wins; either way the result reads back from MODE.
+            hs_lvl_d <= hs_lvl;
+            if (hs_lvl && !hs_lvl_d) begin
+                if (peak_r) begin
+                    peak_r  <= 1'b0;
+                    hires_r <= HIRES_AVAIL;
+                end else if (hires_r) begin
+                    hires_r <= 1'b0;
+                end else begin
+                    peak_r  <= 1'b1;
                 end
                 changed = 1'b1;
             end

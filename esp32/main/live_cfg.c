@@ -16,6 +16,10 @@ esp_err_t live_cfg_init(const scope_acq_cfg_t *initial) {
         return ESP_ERR_NO_MEM;
     }
     s_cfg = *initial;
+    esp_err_t err = scope_or_protect_cfg(OR_WIN_DEFAULT, OR_THR_DEFAULT);
+    if (err != ESP_OK) {
+        return err;
+    }
     return scope_arm(&s_cfg);
 }
 

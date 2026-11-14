@@ -37,6 +37,8 @@
 #define REG_TRIG_HYST       0x0Eu
 #define REG_DEC_FACTOR_L    0x10u
 #define REG_DEC_FACTOR_H    0x11u
+#define REG_OR_WIN          0x12u // over-range window, log2(samples), 10..24
+#define REG_OR_THR          0x13u // over-range trip threshold, /256 of window
 #define REG_PRE_COUNT_L     0x14u
 #define REG_PRE_COUNT_H     0x15u
 #define REG_POST_COUNT_L    0x16u
@@ -48,6 +50,7 @@
 #define REG_PROBE_DIV_L     0x1Cu
 #define REG_PROBE_DIV_H     0x1Du
 #define REG_PROBE_CTL       0x1Eu
+#define REG_ALARM_CTL       0x1Fu // W1 alarm acknowledge
 #define REG_STATUS          0x20u
 #define REG_SAMPLE_COUNT_0  0x21u
 #define REG_SAMPLE_COUNT_1  0x22u
@@ -61,6 +64,7 @@
 #define REG_TRIG_PHASE_H    0x2Au
 #define REG_OVERRANGE_CNT_L 0x2Bu
 #define REG_OVERRANGE_CNT_H 0x2Cu
+#define REG_ALARM           0x2Du // RO over-range protection alarm
 #define REG_ENC_HS_L        0x30u
 #define REG_ENC_HS_H        0x31u
 #define REG_ENC_HO_L        0x32u
@@ -75,7 +79,7 @@
 #define SCOPE_ID0_VAL     0x53u // 'S'
 #define SCOPE_ID1_VAL     0x43u // 'C'
 #define SCOPE_VER_MAJ_VAL 0x01u
-#define SCOPE_VER_MIN_VAL 0x00u
+#define SCOPE_VER_MIN_VAL 0x01u
 
 // CONTROL (0x08). W1 bits self-clear in the FPGA.
 #define CTRL_ARM         (1u << 0) // W1
@@ -93,6 +97,7 @@
 #define MODE_AUTO      0x01u
 #define MODE_SINGLE    0x02u
 #define MODE_PEAK_EN   (1u << 2)
+#define MODE_HIRES_EN  (1u << 3) // only honoured when CAPS_HIRES is set
 
 // TRIG_CFG (0x0A).
 #define TRIGCFG_SRC_MASK   0x03u
@@ -134,6 +139,14 @@
 #define CAPS_EXTTRIG  (1u << 1)
 #define CAPS_SDRAM    (1u << 2)
 #define CAPS_32K      (1u << 3)
+#define CAPS_HIRES    (1u << 4)
+// ALARM_CTL (0x1F) / ALARM (0x2D).
+#define ALARMCTL_OR_CLR   (1u << 0) // W1 clear the sticky over-range alarm
+#define ALARM_OR_TRIP     (1u << 0) // sticky: a window exceeded OR_THR
+#define ALARM_OR_ACTIVE   (1u << 1) // live: last window saw any over-range
+// Over-range monitor defaults (match scope_regs.svh).
+#define OR_WIN_DEFAULT 20u // 2^20 samples, ~10.5 ms at 100 MSa/s
+#define OR_THR_DEFAULT 16u // 16/256, ~6 % of the window
 
 // A read past the end of the record returns this byte.
 #define SCOPE_REC_PAD 0xFFu

@@ -42,5 +42,9 @@
 
 /* J5 future trigger module — FLEX_1/2 used for DIAL_VO_* */
 #define PIN_ESP_FLEX_3 27 /* P27; not an SPI controller pin */
+/* Over-range alarm from the FPGA: jumper J4-3 (FPGA_FLEX_1) to J5-5
+ * (ESP_FLEX_3). Active-high level; internal pull-down so an unfitted wire
+ * reads as no alarm and the firmware falls back to polling REG_ALARM. */
+#define PIN_FPGA_ALARM PIN_ESP_FLEX_3
 
 /* Reserved: GPIO1/3 USB-UART, GPIO6–11 flash, GPIO0/2/12 strapping */

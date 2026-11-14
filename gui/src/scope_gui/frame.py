@@ -22,6 +22,8 @@ MAX_COLS = 4096
 FLAG_PEAK = 1 << 0
 FLAG_TRIGGERED = 1 << 1
 FLAG_OVERRANGE = 1 << 2
+FLAG_GAIN_REDUCED = 1 << 3
+FLAG_HIRES = 1 << 4
 
 AFE_DC_COUPLED = 1 << 0
 AFE_TERM_50R = 1 << 1
@@ -80,6 +82,8 @@ class Frame:
     peak: bool
     triggered: bool
     overrange: bool
+    gain_reduced: bool
+    hires: bool
     dc_coupled: bool
     term_50r: bool
     preamp_hg: bool
@@ -162,6 +166,8 @@ def parse(buf: bytes) -> Frame:
         peak=bool(flags & FLAG_PEAK),
         triggered=bool(flags & FLAG_TRIGGERED),
         overrange=bool(flags & FLAG_OVERRANGE),
+        gain_reduced=bool(flags & FLAG_GAIN_REDUCED),
+        hires=bool(flags & FLAG_HIRES),
         dc_coupled=bool(afe_flags & AFE_DC_COUPLED),
         term_50r=bool(afe_flags & AFE_TERM_50R),
         preamp_hg=bool(afe_flags & AFE_PREAMP_HG),

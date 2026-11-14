@@ -15,7 +15,13 @@ module top
     import scope_pkg::*;
 #(
     parameter int SAMPLE_DEPTH = 16384,
-    parameter int POR_CYCLES   = 135000  // ~5 ms of the 27 MHz crystal
+    parameter int POR_CYCLES   = 135000, // ~5 ms of the 27 MHz crystal
+    // The PCB routes AD9215 VIN+/VIN- swapped. With this set, CONTROL.INVERT_EN
+    // resets to 1, so codes are correct even before the ESP32 configures us.
+    parameter bit ADC_VIN_SWAPPED = 1'b1,
+    // Set when a CIC high-res decimator is instantiated (adds it to the
+    // HS-button mode cycle and to CAPS).
+    parameter bit HIRES_AVAIL     = 1'b0
 ) (
     input  logic       clk,
     input  logic       fpga_clk,
@@ -37,7 +43,11 @@ module top
     input  logic       dial_tg_b,
     input  logic       dial_tg_btn,
     output logic       probe_comp,
-    input  logic [2:0] fpga_flex
+    // Over-range alarm, level, high while REG_ALARM.b0 is set. On J4 pin 3
+    // (FPGA_FLEX_1); jumper it to J5 pin 5 (ESP_FLEX_3, ESP32 GPIO27) so the
+    // ESP32 reacts on an edge instead of waiting for its next poll.
+    output logic       fpga_alarm,
+    input  logic [1:0] fpga_flex     // FPGA_FLEX_2/3: spare mezzanine lines
 );
 
     localparam int AW = $clog2(SAMPLE_DEPTH);
@@ -47,9 +57,10 @@ module top
         (8'b0
          | (8'b1 << CAPS_PEAK_BIT)
          | (8'b1 << CAPS_EXTTRIG_BIT)
-         | ((SAMPLE_DEPTH == 32768) ? (8'b1 << CAPS_32K_BIT) : 8'b0));
+         | ((SAMPLE_DEPTH == 32768) ? (8'b1 << CAPS_32K_BIT) : 8'b0)
+         | (HIRES_AVAIL ? (8'b1 << CAPS_HIRES_BIT) : 8'b0));
 
-    // fpga_flex[2:0] are spare trigger-mezzanine lines, reserved.
+    // fpga_flex[1:0] are spare trigger-mezzanine lines, reserved.
     wire _flex_unused = |{1'b0, fpga_flex};
 
     // ---- Clocking and reset ---------------------------------------------------
@@ -101,6 +112,7 @@ module top
     logic        probe_en_hk;
     logic        commit_tog_hk;
     logic        cmd_arm, cmd_abort, cmd_force, cmd_irq_clr, cmd_soft_reset;
+    logic        cmd_alarm_clr;
     logic [15:0] enc_hs_cnt_hk, enc_ho_cnt_hk, enc_tg_cnt_hk;
     logic [5:0]  enc_btn_hk;
 
@@ -110,7 +122,11 @@ module top
     logic        hw_wr_pop;
     logic        enc_btn_clr_hk;
 
-    settings_arbiter #(.DEPTH(SAMPLE_DEPTH)) u_settings (
+    settings_arbiter #(
+        .DEPTH         (SAMPLE_DEPTH),
+        .HIRES_AVAIL   (HIRES_AVAIL),
+        .INVERT_DEFAULT(ADC_VIN_SWAPPED)
+    ) u_settings (
         .clk         (clk),
         .rst_n       (rst_hk_n),
         .wr_pending  (hw_wr_pending),
@@ -130,6 +146,7 @@ module top
         .cmd_force   (cmd_force),
         .cmd_irq_clr (cmd_irq_clr),
         .cmd_soft_reset (cmd_soft_reset),
+        .cmd_alarm_clr  (cmd_alarm_clr),
         .enc_hs_cnt  (enc_hs_cnt_hk),
         .enc_ho_cnt  (enc_ho_cnt_hk),
         .enc_tg_cnt  (enc_tg_cnt_hk),
@@ -227,6 +244,45 @@ module top
         .or_out     (cond_or),
         .valid_out  (cond_valid)
     );
+
+    // ---- Over-range protection monitor --------------------------------------
+    // Watches the raw OR flag; a sustained over-range trips a sticky alarm in
+    // the HK domain that the ESP32 polls (REG_ALARM) and acts on by stepping
+    // the front-end gain down, then acknowledges via REG_ALARM_CTL.
+    logic or_trip_cap, or_active_cap;
+
+    overrange_monitor u_or_mon (
+        .clk          (adc_sample_clk),
+        .rst_n        (rst_cap_n),
+        .valid_in     (cond_valid),
+        .or_in        (cond_or),
+        .cfg_win_log2 (cfg_cap.or_win),
+        .cfg_thr      (cfg_cap.or_thr),
+        .cfg_update   (cfg_update_cap),
+        .trip_pulse   (or_trip_cap),
+        .active       (or_active_cap)
+    );
+
+    logic or_trip_hk, or_alarm_hk;
+    cdc_pulse_toggle u_or_trip (
+        .src_clk(adc_sample_clk), .src_rst_n(rst_cap_n), .src_pulse(or_trip_cap),
+        .dst_clk(clk), .dst_rst_n(rst_hk_n), .dst_pulse(or_trip_hk));
+
+    // Sticky until acknowledged; a trip in the same cycle as a clear wins, so
+    // an acknowledgement can never swallow a fresh alarm.
+    always_ff @(posedge clk or negedge rst_hk_n) begin
+        if (!rst_hk_n)          or_alarm_hk <= 1'b0;
+        else if (or_trip_hk)    or_alarm_hk <= 1'b1;
+        else if (cmd_alarm_clr) or_alarm_hk <= 1'b0;
+    end
+
+    assign fpga_alarm = or_alarm_hk;   // registered in clk27, glitch-free
+
+    logic [1:0] alarm_spi;
+    cdc_bit_sync #(.WIDTH(1)) u_or_alarm_spi (
+        .clk(spi_sclk), .d(or_alarm_hk), .q(alarm_spi[0]));
+    cdc_bit_sync #(.WIDTH(1)) u_or_active_spi (
+        .clk(spi_sclk), .d(or_active_cap), .q(alarm_spi[1]));
 
     logic        fsm_arm_align;
     logic [9:0]  dec_sample;
@@ -453,6 +509,7 @@ module top
         .probe_en_rb  (probe_en_spi),
         .caps         (CAPS_VALUE),
         .buf_depth    (16'(SAMPLE_DEPTH)),
+        .alarm        (alarm_spi),
         .enc_hs_cnt   (enc_hs_spi),
         .enc_ho_cnt   (enc_ho_spi),
         .enc_tg_cnt   (enc_tg_spi),

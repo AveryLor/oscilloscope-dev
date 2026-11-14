@@ -77,25 +77,29 @@ address holds the least-significant byte.
 | 0x00 | `ID0` | RO | `'S'` | magic |
 | 0x01 | `ID1` | RO | `'C'` | magic |
 | 0x02 | `VER_MAJ` | RO | 1 | protocol major |
-| 0x03 | `VER_MIN` | RO | 0 | protocol minor |
-| 0x04 | `CAPS` | RO | build | b0 peak-detect, b1 ext-trig, b2 SDRAM (0 in v1), b3 built with `SAMPLE_DEPTH=32768` |
+| 0x03 | `VER_MIN` | RO | 1 | protocol minor |
+| 0x04 | `CAPS` | RO | build | b0 peak-detect, b1 ext-trig, b2 SDRAM (0 in v1), b3 built with `SAMPLE_DEPTH=32768`, b4 high-res (CIC) decimator |
 | 0x05..0x06 | `BUF_DEPTH` | RO | `SAMPLE_DEPTH` | sample capacity, 16-bit LE |
 | 0x08 | `CONTROL` | RW | 0x00 | see below |
-| 0x09 | `MODE` | RW | 0x00 | b1:0 mode (0 NORMAL / 1 AUTO / 2 SINGLE), b2 peak-detect enable |
+| 0x09 | `MODE` | RW | 0x00 | b1:0 mode (0 NORMAL / 1 AUTO / 2 SINGLE), b2 peak-detect enable, b3 high-res enable (ignored unless `CAPS.b4`; peak wins if both set). The horizontal-scale button cycles b3:b2 sample → peak → high-res → sample |
 | 0x0A | `TRIG_CFG` | RW | 0x00 | b1:0 source (0 level / 1 ext / 2 force-only), b3:2 edge (0 rising / 1 falling / 2 either) |
 | 0x0C..0x0D | `TRIG_LEVEL` | RW | 0x0200 | 10-bit level code (corrected domain), 16-bit LE; also driven by the trigger knob |
 | 0x0E | `TRIG_HYST` | RW | 0x08 | level-trigger hysteresis code |
+| 0x12 | `OR_WIN` | RW | 20 | over-range monitor window, log2(raw samples), clamped to 10..24 (20 = ~10.5 ms) |
+| 0x13 | `OR_THR` | RW | 16 | over-range trip threshold in 1/256 of the window (16 = ~6 %); 0 disables |
 | 0x10..0x11 | `DEC_FACTOR` | RW | 0 | decimation - 1 (0 => /1), 16-bit LE; also driven by the horizontal-scale knob |
 | 0x14..0x15 | `PRE_COUNT` | RW | `DEPTH/2` | pre-trigger samples, 16-bit LE; the horizontal-offset knob shifts the pre/post split |
 | 0x16..0x17 | `POST_COUNT` | RW | `DEPTH/2` | post-trigger samples, 16-bit LE |
 | 0x18..0x1B | `AUTO_TMO` | RW | ~100 ms | auto-trigger timeout in prescaled capture ticks, 32-bit LE |
 | 0x1C..0x1D | `PROBE_DIV` | RW | 0 | probe-comp half period in 27 MHz cycles (0 => 1 kHz), 16-bit LE |
 | 0x1E | `PROBE_CTL` | RW | 0x01 | b0 probe-comp enable |
+| 0x1F | `ALARM_CTL` | W1 | - | b0 clear the sticky over-range alarm (reads 0) |
 | 0x20 | `STATUS` | RO | - | b2:0 acq state, b3 frozen, b4 pll_lock, b5 irq, b6 triggered_by_auto, b7 overrun |
 | 0x21..0x24 | `SAMPLE_COUNT` | RO | - | valid entries in the frozen record, 32-bit LE |
 | 0x25..0x28 | `TRIG_PTR` | RO | - | trigger sample offset within the record, 32-bit LE |
 | 0x29..0x2A | `TRIG_PHASE` | RO | - | decimation phase counter at the trigger event, 16-bit LE |
 | 0x2B..0x2C | `OVERRANGE_CNT` | RO | - | over-range samples in the record, 16-bit LE |
+| 0x2D | `ALARM` | RO | 0 | b0 over-range trip (sticky until `ALARM_CTL.b0`), b1 last window saw any over-range (live) |
 | 0x30..0x31 | `ENC_HS` | RO | 0 | signed 16-bit raw horizontal-scale encoder count (diagnostic) |
 | 0x32..0x33 | `ENC_HO` | RO | 0 | signed 16-bit raw horizontal-offset encoder count (diagnostic) |
 | 0x34..0x35 | `ENC_TG` | RO | 0 | signed 16-bit raw trigger-level encoder count (diagnostic) |
@@ -111,7 +115,7 @@ address holds the least-significant byte.
 | 1 | `ABORT` | W1 | abort to IDLE, discard any in-progress capture |
 | 2 | `FORCE_TRIG` | W1 | force an immediate trigger |
 | 3 | `AUTO_REARM` | level | re-arm automatically after each dump |
-| 4 | `INVERT_EN` | level | apply the VIN+/VIN- mid-scale code inversion |
+| 4 | `INVERT_EN` | level | apply the VIN+/VIN- mid-scale code inversion. Resets to 1 when `top` is built with `ADC_VIN_SWAPPED=1` (the default for this PCB) |
 | 5 | `IRQ_CLR` | W1 | acknowledge and clear `FPGA_IRQ` |
 | 6 | `REC_REWIND` | W1 | restart the record readout from the first sample |
 | 7 | `SOFT_RESET` | W1 | soft-reset the datapath (settings preserved) |
@@ -137,6 +141,40 @@ There are now two ESP32-side writers of these registers: the one-shot
 `esp32/main/live_cfg.c` driven by host text commands (`docs/CONTROL.md`) —
 both go through the same last-writer-wins registers described above, so they
 compose with a physical knob turn exactly the way `scope_arm()` always did.
+
+### Re-arm without clobbering settings
+
+After the first full configure, the ESP32 re-arms each capture with
+`scope_rearm()`: a single `CONTROL` write carrying the level bits plus `ARM`.
+It never rewrites `MODE`, `TRIG_*`, `DEC_FACTOR` or `PRE/POST_COUNT` per
+capture, so the FPGA knobs and the HS-button mode cycle are not overwritten.
+The ESP32 reads the effective values back (`MODE`..`POST_COUNT` burst) to fill
+each stream frame.
+
+### Over-range protection
+
+`overrange_monitor` counts AD9215 `OR` samples on the raw stream in windows
+of 2^`OR_WIN` samples. A window whose count reaches `OR_THR`/256 sets
+`ALARM.b0` (sticky). The ESP32 polls `ALARM` after every capture (and on
+capture timeouts), steps the front-end gain down once (preamp HG→LG, then one
+LMH6518 ladder step, then one input-divider step if relays are enabled), and
+writes `ALARM_CTL.b0`. Steps are at least 100 ms apart. The backoff stays in
+force until the next deliberate vertical change (`SET_VERTICAL` etc.).
+
+The alarm is also driven on the `fpga_alarm` pin (FPGA_FLEX_1, J4 pin 3) as an
+active-high level that follows `ALARM.b0`. Jumper J4-3 to J5-5 (ESP_FLEX_3,
+ESP32 GPIO27) and the ESP32 reacts on the edge; without the jumper it polls
+`ALARM` every 20 ms. The protection runs in its own ESP32 task
+(`or_protect.c`), so it works while the capture loop waits on a trigger. All
+FPGA register access from the ESP32 is serialised by one bus mutex.
+
+### CONTROL writes always carry the level bits
+
+The FPGA latches `AUTO_REARM` and `INVERT_EN` from every `CONTROL` write, W1
+bits included. The ESP32 therefore never writes a bare one-shot: it uses
+`fpga_control_strobe()`, which ORs in the level bits last set by
+`scope_arm()`/`scope_rearm()`. (Before this, each `IRQ_CLR` or `REC_REWIND`
+turned the VIN+/VIN- correction off until the next arm.)
 
 ### Read a frozen record
 

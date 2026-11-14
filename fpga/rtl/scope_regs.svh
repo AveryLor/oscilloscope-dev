@@ -35,6 +35,8 @@ localparam logic [6:0]
     REG_TRIG_HYST      = 7'h0E,   // RW  hysteresis code
     REG_DEC_FACTOR_L   = 7'h10,   // RW  decimation - 1, 16-bit LE
     REG_DEC_FACTOR_H   = 7'h11,
+    REG_OR_WIN         = 7'h12,   // RW  over-range window, log2(samples), 10..24
+    REG_OR_THR         = 7'h13,   // RW  over-range trip threshold, /256 of window (0 = off)
     REG_PRE_COUNT_L    = 7'h14,   // RW  pre-trigger sample count, 16-bit LE
     REG_PRE_COUNT_H    = 7'h15,
     REG_POST_COUNT_L   = 7'h16,   // RW  post-trigger sample count, 16-bit LE
@@ -46,6 +48,7 @@ localparam logic [6:0]
     REG_PROBE_DIV_L    = 7'h1C,   // RW  probe-comp half period, 16-bit LE
     REG_PROBE_DIV_H    = 7'h1D,
     REG_PROBE_CTL      = 7'h1E,   // RW  probe-comp enable
+    REG_ALARM_CTL      = 7'h1F,   // W1  alarm acknowledge (reads 0)
     REG_STATUS         = 7'h20,   // RO  live acquisition status
     REG_SAMPLE_COUNT_0 = 7'h21,   // RO  entries in the frozen record, 32-bit LE
     REG_SAMPLE_COUNT_1 = 7'h22,
@@ -59,6 +62,7 @@ localparam logic [6:0]
     REG_TRIG_PHASE_H   = 7'h2A,
     REG_OVERRANGE_CNT_L = 7'h2B,  // RO  over-range samples in record, 16-bit LE
     REG_OVERRANGE_CNT_H = 7'h2C,
+    REG_ALARM          = 7'h2D,   // RO  over-range protection alarm
     REG_ENC_HS_L       = 7'h30,   // RO  horizontal-scale encoder count, s16 LE
     REG_ENC_HS_H       = 7'h31,
     REG_ENC_HO_L       = 7'h32,   // RO  horizontal-offset encoder count, s16 LE
@@ -73,7 +77,7 @@ localparam logic [6:0]
 localparam logic [7:0] SCOPE_ID0_VAL     = 8'h53; // 'S'
 localparam logic [7:0] SCOPE_ID1_VAL     = 8'h43; // 'C'
 localparam logic [7:0] SCOPE_VER_MAJ_VAL = 8'h01;
-localparam logic [7:0] SCOPE_VER_MIN_VAL = 8'h00;
+localparam logic [7:0] SCOPE_VER_MIN_VAL = 8'h01;
 
 // CONTROL (0x08). Bits marked W1 are write-1 one-shots that self-clear.
 localparam int CTRL_ARM_BIT        = 0; // W1  arm the acquisition engine
@@ -87,7 +91,8 @@ localparam int CTRL_SOFT_RESET_BIT = 7; // W1  soft-reset the datapath
 
 // MODE (0x09).
 localparam int MODE_SEL_LSB  = 0;       // [1:0] acq_mode_e
-localparam int MODE_PEAK_BIT = 2;       // enable min/max peak-detect decimation
+localparam int MODE_PEAK_BIT  = 2;      // enable min/max peak-detect decimation
+localparam int MODE_HIRES_BIT = 3;      // enable CIC high-res decimation (needs CAPS_HIRES)
 
 // TRIG_CFG (0x0A).
 localparam int TRIGCFG_SRC_LSB  = 0;    // [1:0] trig_src_e
@@ -104,6 +109,16 @@ localparam int STAT_IRQ_BIT        = 5;
 localparam int STAT_TRIGD_AUTO_BIT = 6;
 localparam int STAT_OVERRUN_BIT    = 7;
 
+// ALARM_CTL (0x1F). Write-1 one-shots.
+localparam int ALARMCTL_OR_CLR_BIT = 0; // W1  clear the sticky over-range alarm
+// ALARM (0x2D).
+localparam int ALARM_OR_TRIP_BIT   = 0; // sticky: a window exceeded OR_THR
+localparam int ALARM_OR_ACTIVE_BIT = 1; // live: the last window saw any over-range
+// Over-range monitor defaults: 2**20 samples (~10.5 ms) and 16/256 (~6 %).
+localparam int OR_WIN_DEFAULT = 20;
+localparam int OR_WIN_MIN     = 10;
+localparam int OR_WIN_MAX     = 24;
+localparam int OR_THR_DEFAULT = 16;
 // ENC_BTN (0x36). Each event bit latches on press and clears when this register
 // is read.
 localparam int ENCBTN_HS_LVL_BIT = 0;
@@ -123,6 +138,7 @@ localparam int CAPS_PEAK_BIT    = 0;    // peak-detect decimation present
 localparam int CAPS_EXTTRIG_BIT = 1;    // external hw_trigger present
 localparam int CAPS_SDRAM_BIT   = 2;    // deep SDRAM buffer present (0 in v1)
 localparam int CAPS_32K_BIT     = 3;    // built with SAMPLE_DEPTH = 32768
+localparam int CAPS_HIRES_BIT   = 4;    // CIC high-res decimation present
 
 // Byte past the end of the record reads back as this value.
 localparam logic [7:0] SCOPE_REC_PAD = 8'hFF;

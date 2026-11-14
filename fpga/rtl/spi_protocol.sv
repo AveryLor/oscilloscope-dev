@@ -35,6 +35,7 @@ module spi_protocol
     input  logic        probe_en_rb,
     input  logic [7:0]  caps,
     input  logic [15:0] buf_depth,
+    input  logic [1:0]  alarm,          // {or_active, or_trip_sticky}, synced
 
     // Synced encoder read-back.
     input  logic [15:0] enc_hs_cnt,
@@ -108,13 +109,15 @@ module spi_protocol
             7'(REG_BUF_DEPTH_L):     reg_rd = buf_depth[7:0];
             7'(REG_BUF_DEPTH_H):     reg_rd = buf_depth[15:8];
             7'(REG_CONTROL):         reg_rd = {5'b0, cfg_rb.invert_en, cfg_rb.auto_rearm, 1'b0};
-            7'(REG_MODE):            reg_rd = {5'b0, cfg_rb.peak_en, cfg_rb.mode};
+            7'(REG_MODE):            reg_rd = {4'b0, cfg_rb.hires_en, cfg_rb.peak_en, cfg_rb.mode};
             7'(REG_TRIG_CFG):        reg_rd = {4'b0, cfg_rb.trig_edge, cfg_rb.trig_src};
             7'(REG_TRIG_LEVEL_L):    reg_rd = cfg_rb.trig_level[7:0];
             7'(REG_TRIG_LEVEL_H):    reg_rd = {6'b0, cfg_rb.trig_level[9:8]};
             7'(REG_TRIG_HYST):       reg_rd = cfg_rb.trig_hyst;
             7'(REG_DEC_FACTOR_L):    reg_rd = cfg_rb.dec_factor[7:0];
             7'(REG_DEC_FACTOR_H):    reg_rd = cfg_rb.dec_factor[15:8];
+            7'(REG_OR_WIN):          reg_rd = {3'b0, cfg_rb.or_win};
+            7'(REG_OR_THR):          reg_rd = cfg_rb.or_thr;
             7'(REG_PRE_COUNT_L):     reg_rd = cfg_rb.pre_count[7:0];
             7'(REG_PRE_COUNT_H):     reg_rd = cfg_rb.pre_count[15:8];
             7'(REG_POST_COUNT_L):    reg_rd = cfg_rb.post_count[7:0];
@@ -141,6 +144,7 @@ module spi_protocol
             7'(REG_TRIG_PHASE_H):    reg_rd = sta.trig_phase[15:8];
             7'(REG_OVERRANGE_CNT_L): reg_rd = sta.overrange_cnt[7:0];
             7'(REG_OVERRANGE_CNT_H): reg_rd = sta.overrange_cnt[15:8];
+            7'(REG_ALARM):           reg_rd = {6'b0, alarm};
             7'(REG_ENC_HS_L):        reg_rd = enc_hs_cnt[7:0];
             7'(REG_ENC_HS_H):        reg_rd = enc_hs_cnt[15:8];
             7'(REG_ENC_HO_L):        reg_rd = enc_ho_cnt[7:0];

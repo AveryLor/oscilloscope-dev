@@ -17,6 +17,8 @@
 #define STREAM_FLAG_PEAK      (1u << 0)  // record came from peak-detect mode
 #define STREAM_FLAG_TRIGGERED (1u << 1)  // real trigger, not an AUTO timeout
 #define STREAM_FLAG_OVERRANGE (1u << 2)  // at least one sample clipped
+#define STREAM_FLAG_GAIN_REDUCED (1u << 3) // over-range protection lowered the gain
+#define STREAM_FLAG_HIRES     (1u << 4)  // record came from high-res (CIC) mode
 
 // afe_flags byte
 #define STREAM_AFE_DC_COUPLED (1u << 0)  // else AC

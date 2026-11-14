@@ -3,6 +3,7 @@
 #include "afe.h"
 #include "cmd.h"
 #include "fpga_link.h"
+#include "or_protect.h"
 #include "stream.h"
 
 static const char *TAG = "main";
@@ -15,4 +16,5 @@ void app_main(void)
     ESP_ERROR_CHECK(fpga_link_init());
     stream_init();
     cmd_init();
+    ESP_ERROR_CHECK(or_protect_init());
 }

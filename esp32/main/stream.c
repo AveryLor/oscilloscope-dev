@@ -66,6 +66,7 @@ static void stream_task(void *arg) {
     const scope_acq_cfg_t initial = {
         .mode         = MODE_AUTO,
         .peak_detect  = false,
+        .hires        = false,
         .trig_src     = TRIGCFG_SRC_LEVEL,
         .trig_edge    = TRIGCFG_EDGE_RISING,
         .trig_level   = SCOPE_CODE_MID,
@@ -106,9 +107,11 @@ static void stream_task(void *arg) {
             // case an IRQ edge was lost. Re-read live_cfg first so the re-arm
             // re-applies whatever the host most recently commanded instead of
             // reverting to the boot-time defaults.
+            // Only the ARM strobe and CONTROL level bits are written: every
+            // acquisition setting already lives in the FPGA registers.
             scope_acq_cfg_t acq;
             live_cfg_get_acq(&acq);
-            (void)scope_arm(&acq);
+            (void)scope_rearm(&acq);
             continue;
         }
         if (scope_read_envelope(&env, STREAM_COLS) != ESP_OK) {
@@ -120,11 +123,16 @@ static void stream_task(void *arg) {
 
         scope_acq_cfg_t acq;
         live_cfg_get_acq(&acq);
+        // The FPGA owns the effective settings (host writes, knobs and the
+        // HS-button mode cycle all land there), so report those, not the
+        // ESP32's mirror of the last host command.
+        (void)scope_read_effective(&acq);
 
         // STATUS describes the frozen record, so read it before re-arming.
         uint8_t status = 0;
         (void)fpga_link_read8(REG_STATUS, &status);
-        (void)scope_arm(&acq);
+        (void)scope_rearm(&acq);
+
 
         afe_config_t afe;
         afe_get(&afe);
@@ -145,6 +153,8 @@ static void stream_task(void *arg) {
             .dac_offset    = afe.offset_code,
         };
         if (acq.peak_detect)             meta.flags |= STREAM_FLAG_PEAK;
+        if (acq.hires)                   meta.flags |= STREAM_FLAG_HIRES;
+        if (afe_backoff_active())        meta.flags |= STREAM_FLAG_GAIN_REDUCED;
         if (!(status & STAT_TRIGD_AUTO)) meta.flags |= STREAM_FLAG_TRIGGERED;
         if (env.over_range)              meta.flags |= STREAM_FLAG_OVERRANGE;
 
