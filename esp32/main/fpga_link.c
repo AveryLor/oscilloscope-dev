@@ -26,6 +26,18 @@ static const char *TAG = "fpga_link";
 static spi_device_handle_t s_spi;
 static SemaphoreHandle_t s_irq_sem;
 static bool s_ready;
+// Serialises every FPGA SPI transaction. scope_stream (readout) and cmd_rx
+// (live SET_TIMEBASE/SET_HOFFSET/SET_TRIGGER writes) share s_spi, and
+// spi_device_polling_transmit is not safe to call on one device from two
+// tasks at once: a collision could fail or panic and reboot the ESP32.
+static SemaphoreHandle_t s_spi_lock;
+
+static esp_err_t fpga_spi_xfer(spi_transaction_t *t) {
+  xSemaphoreTake(s_spi_lock, portMAX_DELAY);
+  esp_err_t err = spi_device_polling_transmit(s_spi, t);
+  xSemaphoreGive(s_spi_lock);
+  return err;
+}
 
 // Capture-ready edge from the FPGA. The line is held high until acknowledged
 static void IRAM_ATTR fpga_irq_isr(void *arg) {
@@ -38,6 +50,10 @@ static void IRAM_ATTR fpga_irq_isr(void *arg) {
 }
 
 static esp_err_t fpga_link_spi_init(void) {
+  s_spi_lock = xSemaphoreCreateMutex();
+  if (s_spi_lock == NULL) {
+    return ESP_ERR_NO_MEM;
+  }
   const spi_bus_config_t bus = {
       .mosi_io_num = PIN_FPGA_MOSI,
       .miso_io_num = PIN_FPGA_MISO,
@@ -101,7 +117,7 @@ esp_err_t fpga_link_write_reg(uint8_t addr, const uint8_t *data, size_t len) {
   memset(&t, 0, sizeof(t));
   t.length = 8 * (1 + len);
   t.tx_buffer = buf;
-  return spi_device_polling_transmit(s_spi, &t);
+  return fpga_spi_xfer(&t);
 }
 
 esp_err_t fpga_link_read_reg(uint8_t addr, uint8_t *data, size_t len) {
@@ -121,7 +137,7 @@ esp_err_t fpga_link_read_reg(uint8_t addr, uint8_t *data, size_t len) {
   t.rxlength = 8 * total;
   t.tx_buffer = tx;
   t.rx_buffer = rx;
-  esp_err_t err = spi_device_polling_transmit(s_spi, &t);
+  esp_err_t err = fpga_spi_xfer(&t);
   if (err != ESP_OK) {
     return err;
   }

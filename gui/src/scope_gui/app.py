@@ -563,7 +563,13 @@ class MainWindow(QMainWindow):
     def _update_plot(self, f: Frame) -> None:
         n = len(f.cols)
         dur = f.duration()
-        xs = [i / (n - 1) * dur for i in range(n)] if n > 1 else [0.0] * n
+        # t = 0 at the trigger sample (docs/PROTOCOL.md: "the host aligns the
+        # trace by placing entry TRIG_PTR at t = 0"). Plotting from record
+        # start instead made the wave slide whenever the pre-trigger length
+        # changed between captures.
+        frac = f.trig_fraction()
+        t0 = (frac or 0.0) * dur
+        xs = [i / (n - 1) * dur - t0 for i in range(n)] if n > 1 else [0.0] * n
         ymins = [f.code_to_volts(lo) for lo, _hi in f.cols]
         ymaxs = [f.code_to_volts(hi) for _lo, hi in f.cols]
         mids = [f.code_to_volts((lo + hi) // 2) for lo, hi in f.cols]
@@ -591,9 +597,8 @@ class MainWindow(QMainWindow):
         self._trig_level_line.setPos(f.code_to_volts(f.trig_level))
         self._trig_level_line.show()
 
-        frac = f.trig_fraction()
         if frac is not None:
-            self._trig_pos_line.setPos(frac * dur)
+            self._trig_pos_line.setPos(0.0)
             self._trig_pos_line.show()
         else:
             self._trig_pos_line.hide()
