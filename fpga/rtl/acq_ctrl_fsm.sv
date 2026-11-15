@@ -126,7 +126,12 @@ import scope_pkg::*;
                     end
 
                     S_PREFILL: begin
-                        if (valid_count >= cfg_pre_count) begin
+                        // buf_start is still high on the first PREFILL cycle:
+                        // the buffer clears valid_count on this edge, so the
+                        // count seen now is the previous capture's. Trusting it
+                        // skipped the prefill on every re-arm and left the
+                        // record with a short, random pre-trigger window.
+                        if (!buf_start && valid_count >= cfg_pre_count) begin
                             state   <= S_WAIT_TRIG;
                             tmo_cnt <= '0;
                         end
