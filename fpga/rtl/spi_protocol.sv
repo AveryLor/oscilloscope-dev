@@ -77,7 +77,10 @@ module spi_protocol
             addr     <= 7'd0;
             frm_ix   <= 8'd0;
         end else if (rx_stb) begin
-            frm_ix <= frm_ix + 8'd1;
+            // Saturate rather than wrap: a REC_DATA burst runs past 256 slots,
+            // and a wrap back to 0/1 would read as header/turnaround, sending
+            // 0x00 and skipping rec_advance for two bytes every 256.
+            if (frm_ix != 8'hFF) frm_ix <= frm_ix + 8'd1;
             if (!have_hdr) begin
                 have_hdr <= 1'b1;
                 is_read  <= rx_byte[7];

@@ -25,7 +25,10 @@ def main() -> None:
 
     app = QApplication(sys.argv)
     window = MainWindow(port=args.port, baud=args.baud)
-    window.show()
+    # Let the window manager maximize it: setGeometry(availableGeometry) sized
+    # the client area to the whole screen, so the title bar pushed the bottom
+    # (x-axis, status bar) off-screen.
+    window.showMaximized()
     sys.exit(app.exec())
 
 

@@ -20,6 +20,8 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QSlider,
     QSpinBox,
     QVBoxLayout,
@@ -68,11 +70,15 @@ class MainWindow(QMainWindow):
         self.last_seq: int | None = None
         self.dropped = 0
         self.bad = 0
+        self.bad_kinds = {"lost": 0, "noise": 0, "other": 0}
         self.last_bad: str | None = None
         self.frames = 0
         self.fps = 0.0
         self._fps_since = time.monotonic()
         self._synced_controls = False
+        self._fit_pending = True
+        self._dirty = False
+        self._scale_key: tuple[float, float] | None = None
 
         self._build_top_bar()
         self._build_plot()
@@ -84,8 +90,10 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(central)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.addWidget(self._top_bar)
-        layout.addWidget(self.plot)
+        layout.addWidget(self.lbl_pkpk_big)
+        layout.addWidget(self.plot, stretch=1)
         self.setCentralWidget(central)
+        self.statusBar().addWidget(self.status_label, 1)
 
         self._rescan()
         if port is not None:
@@ -110,7 +118,7 @@ class MainWindow(QMainWindow):
         row.setContentsMargins(0, 0, 0, 0)
 
         self.port_combo = QComboBox()
-        self.port_combo.setMinimumWidth(160)
+        self.port_combo.setMinimumWidth(120)
         self.rescan_btn = QPushButton("Rescan")
         self.rescan_btn.clicked.connect(self._rescan)
 
@@ -135,9 +143,12 @@ class MainWindow(QMainWindow):
         self.zoom_out_btn.clicked.connect(lambda: self._zoom(2.0))
         self.fit_btn = QPushButton("Fit")
         self.fit_btn.setShortcut(QKeySequence("Ctrl+0"))
-        self.fit_btn.clicked.connect(lambda: self.plot.enableAutoRange())
+        self.fit_btn.clicked.connect(self._request_fit)
 
+        # Lives in the status bar, not this row: a long port/error message
+        # here widened the window past the screen and pushed the readout off.
         self.status_label = QLabel("not connected")
+        self.status_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
 
         row.addWidget(QLabel("Port:"))
         row.addWidget(self.port_combo)
@@ -149,9 +160,12 @@ class MainWindow(QMainWindow):
         row.addWidget(self.zoom_in_btn)
         row.addWidget(self.zoom_out_btn)
         row.addWidget(self.fit_btn)
-        row.addWidget(self.status_label, stretch=1)
+        row.addStretch(1)
 
     def _build_plot(self) -> None:
+        self.lbl_pkpk_big = QLabel("Pk-pk: –")
+        self.lbl_pkpk_big.setStyleSheet(f"color: {TRACE}; background: #101010; font-size: 16pt; font-weight: bold; padding: 2px 8px;")
+
         self.plot = pg.PlotWidget()
         self.plot.showGrid(x=True, y=True, alpha=0.3)
         self.plot.setLabel("bottom", "Time", units="s")
@@ -163,6 +177,9 @@ class MainWindow(QMainWindow):
         self._fill = pg.FillBetweenItem(self._env_upper, self._env_lower, brush=pg.mkBrush(*TRACE_FILL))
         self.plot.addItem(self._fill)
         self._midline = self.plot.plot(pen=pg.mkPen(TRACE, width=1.5))
+        for curve in (self._env_upper, self._env_lower, self._midline):
+            curve.setClipToView(True)
+            curve.setDownsampling(auto=True, method="peak")
 
         self._trig_level_line = pg.InfiniteLine(angle=0, pen=pg.mkPen(TRIG_LEVEL, style=Qt.DashLine))
         self._trig_pos_line = pg.InfiniteLine(angle=90, pen=pg.mkPen(TRIG_POS, style=Qt.DashLine))
@@ -174,8 +191,11 @@ class MainWindow(QMainWindow):
         self._no_signal = pg.TextItem("no signal", anchor=(0.5, 0.5), color="#888888")
         self.plot.addItem(self._no_signal, ignoreBounds=True)
         self.plot.getViewBox().setAutoVisible(y=True)
+        # Fit is one-shot, not continuous auto-range: continuous re-ranging
+        # chases each frame's noise, so the whole trace jumped every frame.
         self.plot.setRange(xRange=(0, 1), yRange=(-1, 1), padding=0)
-        self.plot.enableAutoRange()
+        # Fixed axis width: changing tick-label widths otherwise re-flow the layout.
+        self.plot.getAxis("left").setWidth(60)
 
     def _build_readout_dock(self) -> None:
         dock = QDockWidget("Readout", self)
@@ -185,9 +205,15 @@ class MainWindow(QMainWindow):
 
         def add_row(label: str) -> QLabel:
             value = QLabel("–")
+            # Size for the widest value up front, so the dock (sized once from
+            # its hint) doesn't clip "peak detect" or "-999.9 mV" later.
+            value.setMinimumWidth(value.fontMetrics().horizontalAdvance("-999.9 mV  "))
             form.addRow(label, value)
             return value
 
+        self.lbl_pkpk = add_row("Pk-pk")
+        self.lbl_vmax = add_row("Max")
+        self.lbl_vmin = add_row("Min")
         self.lbl_volts_div = add_row("Volts/div")
         self.lbl_time_div = add_row("Time/div")
         self.lbl_samples = add_row("Samples")
@@ -213,7 +239,7 @@ class MainWindow(QMainWindow):
         self.lbl_last_bad.setVisible(False)
         form.addRow(self.lbl_last_bad)
 
-        dock.setWidget(panel)
+        dock.setWidget(self._scrollable(panel))
         self.addDockWidget(Qt.RightDockWidgetArea, dock)
 
     def _build_control_dock(self) -> None:
@@ -323,8 +349,32 @@ class MainWindow(QMainWindow):
             self.dc_checkbox, self.term_checkbox,
         ]
 
-        dock.setWidget(panel)
+        dock.setWidget(self._scrollable(panel))
         self.addDockWidget(Qt.LeftDockWidgetArea, dock)
+
+    @staticmethod
+    def _scrollable(panel: QWidget) -> QScrollArea:
+        # Docks otherwise demand their panel's full size, forcing the window
+        # taller/wider than small screens. Scroll instead; never scroll sideways.
+        area = QScrollArea()
+        area.setWidget(panel)
+        area.setWidgetResizable(True)
+        area.setFrameShape(QScrollArea.NoFrame)
+        area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        area.setMinimumWidth(panel.sizeHint().width() + area.verticalScrollBar().sizeHint().width())
+        return area
+
+    def _request_fit(self) -> None:
+        # Applied on the next drawn frame (or immediately if paused with data).
+        self._fit_pending = True
+        if self.latest is not None and self.pause_btn.isChecked():
+            self._apply_fit()
+
+    def _apply_fit(self) -> None:
+        self._fit_pending = False
+        # Fit the trace only: the trigger lines are infinite, and including
+        # the level line (0 V at code 512) stretched the range down to 0.
+        self.plot.getViewBox().autoRange(padding=0.1, items=[self._env_upper, self._env_lower])
 
     def _zoom(self, factor: float) -> None:
         vb = self.plot.getViewBox()
@@ -366,8 +416,10 @@ class MainWindow(QMainWindow):
         self.last_seq = None
         self.dropped = 0
         self.bad = 0
+        self.bad_kinds = {"lost": 0, "noise": 0, "other": 0}
         self.last_bad = None
         self._synced_controls = False
+        self._fit_pending = True
         self.connect_btn.setText("Disconnect")
         self.port_combo.setEnabled(False)
         self.rescan_btn.setEnabled(False)
@@ -471,6 +523,7 @@ class MainWindow(QMainWindow):
                 self.last_seq = f.seq
                 if not self.pause_btn.isChecked():
                     self.latest = f
+                    self._dirty = True
                 self.frames += 1
                 if not self._synced_controls:
                     self._sync_controls_from_frame(f)
@@ -478,6 +531,8 @@ class MainWindow(QMainWindow):
             elif isinstance(event, BadEvent):
                 self.bad += 1
                 self.last_bad = event.reason
+                kind = "lost" if "bytes lost" in event.reason else "noise" if "bit errors" in event.reason else "other"
+                self.bad_kinds[kind] += 1
             elif isinstance(event, DisconnectedEvent):
                 disconnect_reason = event.reason
 
@@ -496,7 +551,9 @@ class MainWindow(QMainWindow):
             self.frames = 0
             self._fps_since = now
 
-        if self.latest is not None and not self.pause_btn.isChecked():
+        # Redraw only when a new frame arrived, not on every 16 ms tick.
+        if self._dirty and self.latest is not None and not self.pause_btn.isChecked():
+            self._dirty = False
             self._no_signal.hide()
             self._update_plot(self.latest)
             self._update_readout(self.latest)
@@ -511,9 +568,25 @@ class MainWindow(QMainWindow):
         ymaxs = [f.code_to_volts(hi) for _lo, hi in f.cols]
         mids = [f.code_to_volts((lo + hi) // 2) for lo, hi in f.cols]
 
+        if ymaxs:
+            vmax, vmin = max(ymaxs), min(ymins)
+            pkpk = fmt_volts(vmax - vmin)
+            self.lbl_pkpk_big.setText(f"Pk-pk: {pkpk}")
+            self.lbl_pkpk.setText(pkpk)
+            self.lbl_vmax.setText(fmt_volts(vmax))
+            self.lbl_vmin.setText(fmt_volts(vmin))
+
         self._env_upper.setData(xs, ymaxs)
         self._env_lower.setData(xs, ymins)
         self._midline.setData(xs, mids)
+        # Re-fit when the volts or time scale changes (divider, gain,
+        # decimation): the old zoom can be 100x off and hide the trace.
+        key = (f.volts_per_count(), f.sample_period())
+        if key != self._scale_key:
+            self._scale_key = key
+            self._fit_pending = True
+        if self._fit_pending:
+            self._apply_fit()
 
         self._trig_level_line.setPos(f.code_to_volts(f.trig_level))
         self._trig_level_line.show()
@@ -539,7 +612,8 @@ class MainWindow(QMainWindow):
         self.lbl_offset.setText(str(f.dac_offset))
         self.lbl_fps.setText(f"{self.fps:.1f}")
         self.lbl_dropped.setText(str(self.dropped))
-        self.lbl_bad.setText(str(self.bad))
+        k = self.bad_kinds
+        self.lbl_bad.setText(f"{self.bad}  (lost {k['lost']} / noise {k['noise']} / other {k['other']})" if self.bad else "0")
 
         self.lbl_overrange.setVisible(f.overrange)
         if self.last_bad is not None:

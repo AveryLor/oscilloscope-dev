@@ -4,7 +4,8 @@
  *              turnaround byte and ID/VERSION values, little-endian multi-byte
  *              config read-back from a stubbed effective-config bundle, that
  *              writes emit host_wr strobes with an auto-incrementing address, and
- *              that a REC_DATA burst pops the record stream in order.
+ *              that a REC_DATA burst pops the record stream in order, including
+ *              past 256 bytes.
  * Author: Avery Lor
  * Date: Aug 30 2026
  */
@@ -121,6 +122,17 @@ module tb_spi_protocol;
         for (i = 0; i < 4; i = i + 1) begin
             mst.xfer_byte(8'h00, d);
             `EXPECT_EQ(d, 8'h10 + i, "record byte in order");
+        end
+        mst.cs_hi();
+
+        // --- Long REC_DATA burst: the slot counter must not wrap at 256 and
+        // drop back into header/turnaround slots (0x00, no advance) ---
+        mst.cs_lo();
+        mst.xfer_byte(8'h80 | 7'h40, d);
+        mst.xfer_byte(8'h00, d);
+        for (i = 0; i < 512; i = i + 1) begin
+            mst.xfer_byte(8'h00, d);
+            `EXPECT_EQ(d, 8'(8'h14 + i), "long-burst record byte in order");
         end
         mst.cs_hi();
 

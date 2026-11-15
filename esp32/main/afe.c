@@ -26,9 +26,9 @@ static const afe_config_t k_default = {
 };
 
 /*
- * Divider-relay truth table. Polarity and the exact two-line encoding are a
- * guess pending the schematic — TODO: confirm PIN_RELAY_100X_10X /
- * PIN_RELAY_10X_1X active levels and the 1x/10x/100x mapping.
+ * Relays are normally open: driving a relay GPIO high closes it (confirmed).
+ * With relays left undriven every relay is open and the input never reaches
+ * the front end. Divider mapping: see afe_apply_atten.
  */
 // Last configuration handed to afe_set; reported in the sample stream so the
 // host can turn ADC codes into volts.
@@ -41,17 +41,24 @@ static afe_config_t s_cfg;
 // Pin the offset DAC at half scale (VDD/2), ignoring host offset commands
 #define AFE_DAC_FIXED_CODE MCP4726_CODE_MID
 
-// Just dissable all IO inits for relays
-#define AFE_RELAYS_ENABLED 0
+// Drive the input relays from the host's divider/coupling/termination settings.
+#define AFE_RELAYS_ENABLED 1
 
 void afe_get(afe_config_t *out) { *out = s_cfg; }
 
 #if AFE_RELAYS_ENABLED
+/*
+ * Divider chain (relays normally open, GPIO high = closed):
+ *   100X_10X  10X_1X   result
+ *   open      any      100x   (10X_1X has no effect while 100X_10X is open)
+ *   closed    open     10x
+ *   closed    closed   1x
+ */
 static void afe_apply_atten(afe_atten_t a) {
-  int sel_100x = (a == AFE_ATTEN_100X);
-  int sel_10x = (a == AFE_ATTEN_10X);
-  gpio_set_level(PIN_RELAY_100X_10X, sel_100x);
-  gpio_set_level(PIN_RELAY_10X_1X, sel_10x);
+  int close_100x_10x = (a == AFE_ATTEN_10X || a == AFE_ATTEN_1X);
+  int close_10x_1x = (a == AFE_ATTEN_1X);
+  gpio_set_level(PIN_RELAY_100X_10X, close_100x_10x);
+  gpio_set_level(PIN_RELAY_10X_1X, close_10x_1x);
 }
 
 static esp_err_t afe_gpio_init(void) {
