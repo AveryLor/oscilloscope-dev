@@ -140,6 +140,13 @@ bool cmd_parse_line(const char *line, size_t len, cmd_t *out) {
         out->as.term.term_50r = (v[0] != 0);
         return true;
     }
+    if (token_is(kw, kw_len, "SET_ACQ")) {
+        static const uint32_t max[] = {CMD_ACQ_HIRES};
+        if (!parse_fields(p, end, max, 1, v)) return false;
+        out->kind        = CMD_SET_ACQ;
+        out->as.acq.mode = (uint8_t)v[0];
+        return true;
+    }
 
     return false; // unknown keyword
 }

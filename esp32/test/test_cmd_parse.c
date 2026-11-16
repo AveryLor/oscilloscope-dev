@@ -102,6 +102,19 @@ static void valid_coupling_and_term(void) {
     check(!parse("SET_TERM 2", &c), "SET_TERM rejects out-of-range mode");
 }
 
+static void valid_acq(void) {
+    cmd_t c;
+    check(parse("SET_ACQ 0", &c) && c.kind == CMD_SET_ACQ && c.as.acq.mode == CMD_ACQ_SAMPLED,
+          "SET_ACQ 0 -> sampled");
+    check(parse("SET_ACQ 1", &c) && c.kind == CMD_SET_ACQ && c.as.acq.mode == CMD_ACQ_PEAK,
+          "SET_ACQ 1 -> peak");
+    check(parse("SET_ACQ 2", &c) && c.kind == CMD_SET_ACQ && c.as.acq.mode == CMD_ACQ_HIRES,
+          "SET_ACQ 2 -> high-res");
+    check(!parse("SET_ACQ 3", &c), "SET_ACQ rejects mode > 2");
+    check(!parse("SET_ACQ", &c), "SET_ACQ needs a field");
+    check(!parse("SET_ACQ 1 1", &c), "SET_ACQ rejects an extra field");
+}
+
 static void malformed_lines_are_rejected(void) {
     cmd_t c;
     check(!parse("", &c), "empty line rejected");
@@ -144,6 +157,7 @@ int main(void) {
     valid_trigger();
     valid_vertical();
     valid_coupling_and_term();
+    valid_acq();
     malformed_lines_are_rejected();
     crlf_is_tolerated();
     never_reads_past_the_given_length();

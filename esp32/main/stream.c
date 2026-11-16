@@ -16,7 +16,7 @@ static const char *TAG = "stream";
 
 #define STREAM_UART        UART_NUM_0
 #define STREAM_TX_BUF      (8 * 1024)
-#define CAPTURE_TIMEOUT_MS 1000
+#define CAPTURE_TIMEOUT_MS 1000 // floor; scaled up with the timebase below
 #define READ_RETRY_MS      100
 
 static uint16_t s_ymin[STREAM_COLS];
@@ -54,6 +54,24 @@ static uint8_t afe_flags_of(const afe_config_t *afe) {
     return v;
 }
 
+// How long to wait for a capture before assuming an IRQ edge was lost. A
+// record takes (pre + post) x (dec + 1) sample clocks of 10 ns to fill, which
+// passes the fixed floor at the slowest timebases the horizontal-scale knob
+// reaches (2048 samples at /65536 is 1.34 s). Without scaling, the task would
+// re-arm before every such capture finished and the trace would freeze.
+// Allow twice the fill time (prefill plus the wait for a trigger) on top of
+// the floor.
+static uint32_t capture_timeout_ms(const scope_acq_cfg_t *acq) {
+    // A record can never be longer than the buffer, whatever the registers
+    // say; this also bounds the wait if a bad read returns garbage counts.
+    uint32_t samples = (uint32_t)acq->pre_count + acq->post_count;
+    if (samples > SCOPE_REC_MAX_SAMPLES) {
+        samples = SCOPE_REC_MAX_SAMPLES;
+    }
+    const uint64_t fill_ns = (uint64_t)samples * ((uint64_t)acq->dec_factor + 1u) * 10u;
+    return CAPTURE_TIMEOUT_MS + (uint32_t)(2u * fill_ns / 1000000u);
+}
+
 static void stream_task(void *arg) {
     (void)arg;
 
@@ -66,6 +84,7 @@ static void stream_task(void *arg) {
     const scope_acq_cfg_t initial = {
         .mode         = MODE_AUTO,
         .peak_detect  = false,
+        .hires        = false,
         .trig_src     = TRIGCFG_SRC_LEVEL,
         .trig_edge    = TRIGCFG_EDGE_RISING,
         .trig_level   = SCOPE_CODE_MID,
@@ -99,16 +118,24 @@ static void stream_task(void *arg) {
         .n_cols = STREAM_COLS,
     };
     uint32_t seq = 0;
+    // Settings the FPGA is capturing with, refreshed from its registers every
+    // loop so a knob turn is picked up even when no capture completes.
+    scope_acq_cfg_t effective = initial;
 
     for (;;) {
-        if (scope_wait_ready(CAPTURE_TIMEOUT_MS) != ESP_OK) {
+        if (scope_wait_ready(capture_timeout_ms(&effective)) != ESP_OK) {
+            // Pick up a timebase change made while we were waiting, so the
+            // next wait is sized for it.
+            (void)scope_read_effective(&effective);
             // No capture within the window: re-arm rather than wedging, in
             // case an IRQ edge was lost. Re-read live_cfg first so the re-arm
             // re-applies whatever the host most recently commanded instead of
             // reverting to the boot-time defaults.
+            // Only the ARM strobe and CONTROL level bits are written: every
+            // acquisition setting already lives in the FPGA registers.
             scope_acq_cfg_t acq;
             live_cfg_get_acq(&acq);
-            (void)scope_arm(&acq);
+            (void)scope_rearm(&acq);
             continue;
         }
         if (scope_read_envelope(&env, STREAM_COLS) != ESP_OK) {
@@ -120,11 +147,17 @@ static void stream_task(void *arg) {
 
         scope_acq_cfg_t acq;
         live_cfg_get_acq(&acq);
+        // The FPGA owns the effective settings (host writes, knobs and the
+        // HS-button mode cycle all land there), so report those, not the
+        // ESP32's mirror of the last host command.
+        (void)scope_read_effective(&acq);
+        effective = acq;
 
         // STATUS describes the frozen record, so read it before re-arming.
         uint8_t status = 0;
         (void)fpga_link_read8(REG_STATUS, &status);
-        (void)scope_arm(&acq);
+        (void)scope_rearm(&acq);
+
 
         afe_config_t afe;
         afe_get(&afe);
@@ -145,6 +178,8 @@ static void stream_task(void *arg) {
             .dac_offset    = afe.offset_code,
         };
         if (acq.peak_detect)             meta.flags |= STREAM_FLAG_PEAK;
+        if (acq.hires)                   meta.flags |= STREAM_FLAG_HIRES;
+        if (afe_backoff_active())        meta.flags |= STREAM_FLAG_GAIN_REDUCED;
         if (!(status & STAT_TRIGD_AUTO)) meta.flags |= STREAM_FLAG_TRIGGERED;
         if (env.over_range)              meta.flags |= STREAM_FLAG_OVERRANGE;
 

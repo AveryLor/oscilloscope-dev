@@ -3,6 +3,8 @@
 #include "driver/i2c_master.h"
 #include "driver/spi_master.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "mcp4726.h"
 #include "pins.h"
 
@@ -26,32 +28,53 @@ static const afe_config_t k_default = {
 };
 
 /*
- * Divider-relay truth table. Polarity and the exact two-line encoding are a
- * guess pending the schematic — TODO: confirm PIN_RELAY_100X_10X /
- * PIN_RELAY_10X_1X active levels and the 1x/10x/100x mapping.
+ * Relays are normally open: driving a relay GPIO high closes it (confirmed).
+ * With relays left undriven every relay is open and the input never reaches
+ * the front end. Divider mapping: see afe_apply_atten.
  */
-// Last configuration handed to afe_set; reported in the sample stream so the
-// host can turn ADC codes into volts.
+// Effective configuration actually applied to the hardware (request + pins +
+// over-range backoff); reported in the sample stream so the host can turn ADC
+// codes into volts.
 static afe_config_t s_cfg;
 
-// Roughly 0db?
-#define AFE_VGA_UNITY_PREAMP LMH6518_PREAMP_LG
-#define AFE_VGA_UNITY_LADDER 9
+// Last configuration requested through afe_set (by the host or at boot).
+static afe_config_t s_req;
+
+// Over-range protection backoff, layered on top of s_req. Cleared by the
+// next afe_set, i.e. by any deliberate vertical change from the user.
+static bool    s_bo_force_lg;  // preamp forced to low gain
+static uint8_t s_bo_ladder;    // extra LMH6518 ladder steps (2 dB each)
+static uint8_t s_bo_atten;     // extra input-divider steps (x10 each)
+
+// afe_set (command task) and afe_protect_step (stream task) both drive the
+// relays, SPI and I2C devices.
+static SemaphoreHandle_t s_lock;
 
 // Pin the offset DAC at half scale (VDD/2), ignoring host offset commands
 #define AFE_DAC_FIXED_CODE MCP4726_CODE_MID
 
-// Just dissable all IO inits for relays
-#define AFE_RELAYS_ENABLED 0
+// Drive the input relays from the host's divider/coupling/termination settings.
+#define AFE_RELAYS_ENABLED 1
 
-void afe_get(afe_config_t *out) { *out = s_cfg; }
+void afe_get(afe_config_t *out) {
+  xSemaphoreTake(s_lock, portMAX_DELAY);
+  *out = s_cfg;
+  xSemaphoreGive(s_lock);
+}
 
 #if AFE_RELAYS_ENABLED
+/*
+ * Divider chain (relays normally open, GPIO high = closed):
+ *   100X_10X  10X_1X   result
+ *   open      any      100x   (10X_1X has no effect while 100X_10X is open)
+ *   closed    open     10x
+ *   closed    closed   1x
+ */
 static void afe_apply_atten(afe_atten_t a) {
-  int sel_100x = (a == AFE_ATTEN_100X);
-  int sel_10x = (a == AFE_ATTEN_10X);
-  gpio_set_level(PIN_RELAY_100X_10X, sel_100x);
-  gpio_set_level(PIN_RELAY_10X_1X, sel_10x);
+  int close_100x_10x = (a == AFE_ATTEN_10X || a == AFE_ATTEN_1X);
+  int close_10x_1x = (a == AFE_ATTEN_1X);
+  gpio_set_level(PIN_RELAY_100X_10X, close_100x_10x);
+  gpio_set_level(PIN_RELAY_10X_1X, close_10x_1x);
 }
 
 static esp_err_t afe_gpio_init(void) {
@@ -101,25 +124,41 @@ static esp_err_t afe_i2c_init(void) {
                       MCP4726_VREF_PIN_BUFFERED, MCP4726_GAIN_1X);
 }
 
-esp_err_t afe_set(const afe_config_t *cfg) {
-  if (cfg == NULL) {
-    return ESP_ERR_INVALID_ARG;
-  }
+// Requested config with the bring-up pin applied, before any backoff. The
+// preamp and ladder follow the request (GUI or the vertical-scale knob); only
+// the offset DAC is still held at mid-scale.
+static afe_config_t afe_base_locked(void) {
+  afe_config_t b = s_req;
+  b.offset_code = AFE_DAC_FIXED_CODE;
+  return b;
+}
 
-  s_cfg = *cfg;
-  s_cfg.preamp = AFE_VGA_UNITY_PREAMP;
-  s_cfg.lmh_atten = AFE_VGA_UNITY_LADDER;
-  s_cfg.offset_code = AFE_DAC_FIXED_CODE;
+// Base config plus the protection backoff: what the hardware should be.
+static afe_config_t afe_effective_locked(void) {
+  afe_config_t e = afe_base_locked();
+  if (s_bo_force_lg) {
+    e.preamp = LMH6518_PREAMP_LG;
+  }
+  unsigned ladder = (unsigned)e.lmh_atten + s_bo_ladder;
+  e.lmh_atten = (uint8_t)(ladder > LMH6518_ATTEN_MAX ? LMH6518_ATTEN_MAX : ladder);
+  unsigned atten = (unsigned)e.atten + s_bo_atten;
+  e.atten = (afe_atten_t)(atten > AFE_ATTEN_100X ? AFE_ATTEN_100X : atten);
+  return e;
+}
+
+static esp_err_t afe_apply_locked(void) {
+  const afe_config_t e = afe_effective_locked();
+  s_cfg = e;
 #if AFE_RELAYS_ENABLED
-  afe_apply_atten(cfg->atten);
-  gpio_set_level(PIN_RELAY_DC_COUP, cfg->dc_coupled);
-  gpio_set_level(PIN_RELAY_50_OHM, cfg->term_50r);
+  afe_apply_atten(e.atten);
+  gpio_set_level(PIN_RELAY_DC_COUP, e.dc_coupled);
+  gpio_set_level(PIN_RELAY_50_OHM, e.term_50r);
 #endif
 
   const lmh6518_state_t vga = {
-      .preamp = s_cfg.preamp,
-      .atten = s_cfg.lmh_atten,
-      .bw = cfg->bw,
+      .preamp = e.preamp,
+      .atten = e.lmh_atten,
+      .bw = e.bw,
       .aux = LMH6518_AUX_ON,
   };
   esp_err_t err = lmh6518_set_state(&s_vga, &vga);
@@ -127,11 +166,65 @@ esp_err_t afe_set(const afe_config_t *cfg) {
     return err;
   }
 
-  return mcp4726_set_code(&s_dac, s_cfg.offset_code);
+  return mcp4726_set_code(&s_dac, e.offset_code);
+}
+
+esp_err_t afe_set(const afe_config_t *cfg) {
+  if (cfg == NULL) {
+    return ESP_ERR_INVALID_ARG;
+  }
+  xSemaphoreTake(s_lock, portMAX_DELAY);
+  s_req = *cfg;
+  // A deliberate vertical change from the user supersedes any automatic
+  // backoff: they are choosing the range now.
+  s_bo_force_lg = false;
+  s_bo_ladder = 0;
+  s_bo_atten = 0;
+  esp_err_t err = afe_apply_locked();
+  xSemaphoreGive(s_lock);
+  return err;
+}
+
+/*
+ * One step of over-range protection, cheapest-to-undo first:
+ *   1. high-gain preamp -> low-gain (-20 dB)
+ *   2. one more LMH6518 ladder step (-2 dB) until the ladder is at maximum
+ *   3. one more input-divider step (x10) until 100x, if the relays are enabled
+ * Returns ESP_ERR_NOT_FOUND when every stage is already at minimum gain.
+ */
+esp_err_t afe_protect_step(void) {
+  xSemaphoreTake(s_lock, portMAX_DELAY);
+  const afe_config_t e = afe_effective_locked();
+  esp_err_t err = ESP_OK;
+  if (e.preamp == LMH6518_PREAMP_HG) {
+    s_bo_force_lg = true;
+  } else if (e.lmh_atten < LMH6518_ATTEN_MAX) {
+    s_bo_ladder++;
+  } else if (AFE_RELAYS_ENABLED && e.atten < AFE_ATTEN_100X) {
+    s_bo_atten++;
+  } else {
+    err = ESP_ERR_NOT_FOUND;
+  }
+  if (err == ESP_OK) {
+    err = afe_apply_locked();
+  }
+  xSemaphoreGive(s_lock);
+  return err;
+}
+
+bool afe_backoff_active(void) {
+  xSemaphoreTake(s_lock, portMAX_DELAY);
+  const bool active = s_bo_force_lg || s_bo_ladder != 0 || s_bo_atten != 0;
+  xSemaphoreGive(s_lock);
+  return active;
 }
 
 esp_err_t afe_init(void) {
   esp_err_t err;
+  s_lock = xSemaphoreCreateMutex();
+  if (s_lock == NULL) {
+    return ESP_ERR_NO_MEM;
+  }
 #if AFE_RELAYS_ENABLED
   err = afe_gpio_init();
   if (err != ESP_OK) {

@@ -5,7 +5,7 @@ CC     ?= gcc
 CFLAGS := -std=c11 -Wall -Wextra -Werror -O2 -I../main
 
 BUILD := build
-TESTS := test_envelope test_stream_frame test_cmd_parse
+TESTS := test_envelope test_stream_frame test_cmd_parse test_vscale
 
 .PHONY: all clean $(TESTS)
 
@@ -21,6 +21,9 @@ test_stream_frame: $(BUILD)/test_stream_frame
 test_cmd_parse: $(BUILD)/test_cmd_parse
 	@./$<
 
+test_vscale: $(BUILD)/test_vscale
+	@./$<
+
 $(BUILD)/test_envelope: test_envelope.c ../main/envelope.c ../main/envelope.h
 	@mkdir -p $(BUILD)
 	@$(CC) $(CFLAGS) -o $@ test_envelope.c ../main/envelope.c
@@ -32,6 +35,10 @@ $(BUILD)/test_stream_frame: test_stream_frame.c ../main/stream_frame.c ../main/s
 $(BUILD)/test_cmd_parse: test_cmd_parse.c ../main/cmd_parse.c ../main/cmd_parse.h
 	@mkdir -p $(BUILD)
 	@$(CC) $(CFLAGS) -o $@ test_cmd_parse.c ../main/cmd_parse.c
+
+$(BUILD)/test_vscale: test_vscale.c ../main/vscale.c ../main/vscale.h
+	@mkdir -p $(BUILD)
+	@$(CC) $(CFLAGS) -o $@ test_vscale.c ../main/vscale.c
 
 clean:
 	rm -rf $(BUILD)

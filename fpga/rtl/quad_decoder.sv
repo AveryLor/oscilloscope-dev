@@ -36,23 +36,29 @@ module quad_decoder #(
     logic [2:0] sync0, sync1;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            sync0 <= 3'b000;
-            sync1 <= 3'b000;
+            // Pins idle high (pull-ups): reset to the released state so the
+            // first clocks after reset never look like a press or a detent.
+            sync0 <= 3'b111;
+            sync1 <= 3'b111;
         end else begin
             sync0 <= {btn_raw, b_raw, a_raw};
             sync1 <= sync0;
         end
     end
 
-    logic [2:0] dbnc;
+    // debounce resets its output to 0, so debounce the active-high
+    // (pressed / contact-closed) sense and invert back. Reset then means
+    // "released", matching the pins' idle level.
+    logic [2:0] dbnc_n, dbnc;
+    assign dbnc = ~dbnc_n;
     debounce #(
         .WIDTH      (3),
         .STABLE_CYC (DEBOUNCE_CYC)
     ) u_dbnc (
         .clk   (clk),
         .rst_n (rst_n),
-        .d     (sync1),
-        .q     (dbnc)
+        .d     (~sync1),
+        .q     (dbnc_n)
     );
 
     wire a_db   = dbnc[0];
@@ -75,7 +81,7 @@ module quad_decoder #(
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            q_prev  <= 2'b00;
+            q_prev  <= 2'b11;
             count_q <= '0;
         end else begin
             q_prev <= {b_db, a_db};

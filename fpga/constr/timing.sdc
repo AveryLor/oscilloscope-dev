@@ -25,7 +25,7 @@ set_false_path -from [get_ports {dial_hs_a dial_hs_b dial_hs_btn}]
 set_false_path -from [get_ports {dial_ho_a dial_ho_b dial_ho_btn}]
 set_false_path -from [get_ports {dial_tg_a dial_tg_b dial_tg_btn}]
 set_false_path -from [get_ports {fpga_flex[*]}]
-set_false_path -to   [get_ports {probe_comp fpga_irq}]
+set_false_path -to   [get_ports {probe_comp fpga_irq fpga_alarm}]
 
 # ADC bus input delay, relative to fpga_clk at the FPGA pin.
 #   AD9215BCP-105 datasheet Table 4: tOD = 2.5 ns min / 6.5 ns max after CLK.

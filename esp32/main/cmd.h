@@ -15,3 +15,9 @@
 /* Starts the RX-parsing and AFE-apply tasks. Call after stream_init() (reuses
  * its UART0 driver install) and after afe_init()/fpga_link_init(). */
 void cmd_init(void);
+
+/* Step the vertical scale by whole knob detents along the vscale.h ladder:
+ * positive zooms in (more gain), negative zooms out. Composes with the host's
+ * SET_VERTICAL / SET_COUPLING / SET_TERM commands and goes through the same
+ * rate-limited AFE queue. Safe to call from any task once cmd_init() has run. */
+void cmd_vscale_nudge(int detents);

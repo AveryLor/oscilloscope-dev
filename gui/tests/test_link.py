@@ -49,3 +49,49 @@ def test_delivers_frames_split_across_multiple_pushes():
     result = d.next_frame()
     assert isinstance(result, frame.Frame)
     assert result.seq == 99
+
+
+def test_link_reader_process_delivers_frames_and_writes_commands():
+    import os
+    import queue
+    import time
+
+    from scope_gui.link import FrameEvent, Link
+
+    master, slave = os.openpty()
+    try:
+        link = Link(os.ttyname(slave), 921_600)
+        try:
+            os.write(master, b"junk" + build_frame(seq=7))
+            deadline = time.monotonic() + 5.0
+            event = None
+            while time.monotonic() < deadline:
+                try:
+                    event = link.events.get_nowait()
+                    break
+                except queue.Empty:
+                    time.sleep(0.01)
+            assert isinstance(event, FrameEvent)
+            assert event.frame.seq == 7
+
+            assert link.send("SET_COUPLING 1")
+            got = b""
+            deadline = time.monotonic() + 5.0
+            while not got.endswith(b"\n") and time.monotonic() < deadline:
+                got += os.read(master, 64)
+            assert got == b"SET_COUPLING 1\n"
+        finally:
+            link.close()
+    finally:
+        os.close(master)
+        os.close(slave)
+
+
+def test_link_raises_when_the_port_cannot_be_opened():
+    import pytest
+    import serial
+
+    from scope_gui.link import Link
+
+    with pytest.raises(serial.SerialException):
+        Link("/dev/does-not-exist-scope", 921_600)

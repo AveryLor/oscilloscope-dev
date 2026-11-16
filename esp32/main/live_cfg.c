@@ -16,6 +16,10 @@ esp_err_t live_cfg_init(const scope_acq_cfg_t *initial) {
         return ESP_ERR_NO_MEM;
     }
     s_cfg = *initial;
+    esp_err_t err = scope_or_protect_cfg(OR_WIN_DEFAULT, OR_THR_DEFAULT);
+    if (err != ESP_OK) {
+        return err;
+    }
     return scope_arm(&s_cfg);
 }
 
@@ -55,6 +59,28 @@ esp_err_t live_cfg_set_hoffset(uint16_t pre_count, uint16_t post_count) {
     xSemaphoreTake(s_lock, portMAX_DELAY);
     s_cfg.pre_count  = pre_count;
     s_cfg.post_count = post_count;
+    xSemaphoreGive(s_lock);
+    return ESP_OK;
+}
+
+esp_err_t live_cfg_set_acq(bool peak, bool hires) {
+    // Read-modify-write so the mode-select bits keep whatever is in force.
+    // The FPGA register, not the mirror, is the reference: the knob's button
+    // changes MODE without the ESP32 hearing about it.
+    uint8_t mode = 0;
+    esp_err_t err = fpga_link_read8(REG_MODE, &mode);
+    if (err != ESP_OK) {
+        return err;
+    }
+    mode = (uint8_t)((mode & MODE_SEL_MASK) | (peak ? MODE_PEAK_EN : 0) |
+                     (hires ? MODE_HIRES_EN : 0));
+    err = fpga_link_write8(REG_MODE, mode);
+    if (err != ESP_OK) {
+        return err;
+    }
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_cfg.peak_detect = peak;
+    s_cfg.hires       = hires;
     xSemaphoreGive(s_lock);
     return ESP_OK;
 }

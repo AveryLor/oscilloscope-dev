@@ -3,7 +3,12 @@
  * Description: settings_arbiter applies host register writes to the effective
  *              config, turns a CONTROL write-1 bit into a command pulse, applies
  *              a trigger-encoder detent as a LEVEL_STEP change to trig_level, and
- *              flips commit_tog on every change.
+ *              flips commit_tog on every change. Also: the HS button cycles
+ *              sample -> peak -> sample (high-res not built), MODE writes keep
+ *              hires off when unavailable, OR_WIN/OR_THR land in the config,
+ *              and an ALARM_CTL write pulses cmd_alarm_clr. A second instance
+ *              built with HIRES_AVAIL=1 sees the same pins and writes and must
+ *              cycle sample -> peak -> high-res -> sample instead.
  * Author: Avery Lor
  * Date: Aug 30 2026
  */
@@ -28,6 +33,7 @@ module tb_settings_arbiter;
     logic        probe_en;
     logic        commit_tog;
     logic        cmd_arm, cmd_abort, cmd_force, cmd_irq_clr, cmd_soft_reset;
+    logic        cmd_alarm_clr;
     logic [15:0] enc_hs, enc_ho, enc_tg;
     logic [5:0]  enc_btn;
     always #5 clk = ~clk;
@@ -43,8 +49,27 @@ module tb_settings_arbiter;
         .commit_tog(commit_tog),
         .cmd_arm(cmd_arm), .cmd_abort(cmd_abort), .cmd_force(cmd_force),
         .cmd_irq_clr(cmd_irq_clr), .cmd_soft_reset(cmd_soft_reset),
+        .cmd_alarm_clr(cmd_alarm_clr),
         .enc_hs_cnt(enc_hs), .enc_ho_cnt(enc_ho), .enc_tg_cnt(enc_tg),
         .enc_btn(enc_btn));
+
+    // Same stimulus, high-res decimator built in. Only the config is observed.
+    scope_cfg_t cfg_hr;
+    settings_arbiter #(.DEPTH(16384), .LEVEL_STEP(8), .ENC_DEBOUNCE(2),
+                       .HIRES_AVAIL(1'b1)) dut_hr (
+        .clk(clk), .rst_n(rst_n),
+        .wr_pending(wr_pending), .wr_addr(wr_addr), .wr_data(wr_data), .wr_pop(),
+        .dial_hs_a(ha), .dial_hs_b(hb), .dial_hs_btn(hbtn),
+        .dial_ho_a(oa), .dial_ho_b(ob), .dial_ho_btn(obtn),
+        .dial_tg_a(ta), .dial_tg_b(tb_), .dial_tg_btn(tbtn),
+        .enc_btn_clr(enc_btn_clr),
+        .cfg_o(cfg_hr), .probe_div_o(), .probe_en_o(),
+        .commit_tog(),
+        .cmd_arm(), .cmd_abort(), .cmd_force(),
+        .cmd_irq_clr(), .cmd_soft_reset(),
+        .cmd_alarm_clr(),
+        .enc_hs_cnt(), .enc_ho_cnt(), .enc_tg_cnt(),
+        .enc_btn());
 
     task automatic host_write(input [6:0] a, input [7:0] d);
         wr_addr = a; wr_data = d; wr_pending = 1'b1;
@@ -61,7 +86,14 @@ module tb_settings_arbiter;
         ta = 1; tb_ = 1; repeat (8) @(posedge clk);
     endtask
 
+    task automatic hs_press;
+        hbtn = 0; repeat (12) @(posedge clk);
+        hbtn = 1; repeat (12) @(posedge clk);
+    endtask
+
     integer arm_count = 0;
+    integer aclr_count = 0;
+    always @(posedge clk) if (cmd_alarm_clr) aclr_count = aclr_count + 1;
     always @(posedge clk) if (cmd_arm) arm_count = arm_count + 1;
 
     logic ct0;
@@ -94,6 +126,46 @@ module tb_settings_arbiter;
         tg_detent_fwd();
         repeat (4) @(posedge clk); #1;
         `EXPECT_EQ(cfg.trig_level, lvl0 + 10'd8, "detent bumped trig_level by LEVEL_STEP");
+
+        // OR protection defaults and writes.
+        `EXPECT_EQ(cfg.or_win, 5'd20, "default or_win");
+        `EXPECT_EQ(cfg.or_thr, 8'd16, "default or_thr");
+        host_write(7'h12, 8'd14);
+        host_write(7'h13, 8'd64);
+        repeat (2) @(posedge clk); #1;
+        `EXPECT_EQ(cfg.or_win, 5'd14, "or_win written");
+        `EXPECT_EQ(cfg.or_thr, 8'd64, "or_thr written");
+        aclr_count = 0;
+        host_write(7'h1F, 8'h01);
+        repeat (2) @(posedge clk); #1;
+        `EXPECT_EQ(aclr_count, 1, "ALARM_CTL write produced one cmd_alarm_clr");
+
+        // HS button cycles the acquisition type; hires is not built here.
+        `EXPECT_EQ({cfg.hires_en, cfg.peak_en}, 2'b00, "starts in sample mode");
+        ct0 = commit_tog;
+        hs_press();
+        repeat (2) @(posedge clk); #1;
+        `EXPECT_EQ({cfg.hires_en, cfg.peak_en}, 2'b01, "press 1 -> peak");
+        `EXPECT_EQ({cfg_hr.hires_en, cfg_hr.peak_en}, 2'b01, "hires build: press 1 -> peak");
+        `EXPECT(commit_tog !== ct0, "mode change committed");
+        hs_press();
+        repeat (2) @(posedge clk); #1;
+        `EXPECT_EQ({cfg.hires_en, cfg.peak_en}, 2'b00, "press 2 -> sample (no hires)");
+        `EXPECT_EQ({cfg_hr.hires_en, cfg_hr.peak_en}, 2'b10, "hires build: press 2 -> high-res");
+        hs_press();
+        repeat (2) @(posedge clk); #1;
+        `EXPECT_EQ({cfg_hr.hires_en, cfg_hr.peak_en}, 2'b00, "hires build: press 3 -> sample");
+        `EXPECT_EQ({cfg.hires_en, cfg.peak_en}, 2'b01, "no-hires build is back at peak");
+        // A MODE write asking for hires is refused when it is not built.
+        host_write(7'h09, 8'h09);
+        repeat (2) @(posedge clk); #1;
+        `EXPECT_EQ(cfg.hires_en, 1'b0, "hires refused when unavailable");
+        `EXPECT_EQ(cfg.mode, 2'd1, "mode field still written");
+        `EXPECT_EQ(cfg_hr.hires_en, 1'b1, "hires build: MODE write selects high-res");
+        // Peak wins when a host sets both bits.
+        host_write(7'h09, 8'h0D);
+        repeat (2) @(posedge clk); #1;
+        `EXPECT_EQ({cfg_hr.hires_en, cfg_hr.peak_en}, 2'b01, "hires build: peak wins over high-res");
 
         `TB_FINISH("tb_settings_arbiter");
     end

@@ -20,6 +20,8 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QSlider,
     QSpinBox,
     QVBoxLayout,
@@ -36,6 +38,23 @@ TRIG_LEVEL = "#FF9020"
 TRIG_POS = "#20A0FF"
 WARN = "#FF3B30"
 
+# Acquisition modes cycled by the horizontal-scale knob's button, keyed the way
+# acq_mode() returns them: (label, badge colour).
+ACQ_MODES = {
+    "sampled": ("SAMPLED", "#C8C8C8"),
+    "peak": ("PEAK DETECT", "#FFC83D"),
+    "hires": ("HIGH-RES (CIC)", "#3DC8FF"),
+}
+# Same order as the knob's button; SET_ACQ code for each.
+ACQ_CYCLE = ("sampled", "peak", "hires")
+ACQ_CODE = {"sampled": control.ACQ_SAMPLED, "peak": control.ACQ_PEAK, "hires": control.ACQ_HIRES}
+BIG_LABEL_STYLE = "background: #101010; font-size: 16pt; font-weight: bold; padding: 2px 8px;"
+
+# A settings change echoed by the device this long after the last local edit
+# did not come from this GUI (a knob was turned, or the over-range backoff
+# stepped the gain), so the control widgets are re-read from the device.
+RESYNC_QUIET_S = 0.5
+
 
 def fmt_volts(v: float) -> str:
     a = abs(v)
@@ -44,6 +63,22 @@ def fmt_volts(v: float) -> str:
     if a >= 1e-3:
         return f"{v * 1e3:.1f} mV"
     return f"{v * 1e6:.0f} µV"
+
+
+def acq_mode(f: Frame) -> str:
+    """Which decimator filled this record. Peak wins if both flags are set,
+    matching the FPGA (docs/PROTOCOL.md)."""
+    if f.peak:
+        return "peak"
+    if f.hires:
+        return "hires"
+    return "sampled"
+
+
+def fmt_hscale(f: Frame) -> str:
+    """One-line horizontal-scale summary: mode, decimation and time/div."""
+    label, _colour = ACQ_MODES[acq_mode(f)]
+    return f"{label}  ·  /{f.dec_factor + 1}  ·  {fmt_secs(f.duration() / 10.0)}/div"
 
 
 def fmt_secs(s: float) -> str:
@@ -68,11 +103,23 @@ class MainWindow(QMainWindow):
         self.last_seq: int | None = None
         self.dropped = 0
         self.bad = 0
+        self.bad_kinds = {"lost": 0, "noise": 0, "other": 0}
         self.last_bad: str | None = None
         self.frames = 0
         self.fps = 0.0
         self._fps_since = time.monotonic()
         self._synced_controls = False
+        self._echo_key: tuple | None = None
+        self._last_local_edit = 0.0
+        self._fit_pending = True
+        self._dirty = False
+        self._scale_key: tuple[float, float] | None = None
+        # Acquisition mode as last reported by the device, and the one this GUI
+        # last asked for (with when), so fast clicks step from the requested
+        # mode instead of an echo that has not caught up yet.
+        self._acq_device = "sampled"
+        self._acq_requested: str | None = None
+        self._acq_requested_at = 0.0
 
         self._build_top_bar()
         self._build_plot()
@@ -84,8 +131,14 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(central)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.addWidget(self._top_bar)
-        layout.addWidget(self.plot)
+        big_row = QHBoxLayout()
+        big_row.setSpacing(4)
+        big_row.addWidget(self.lbl_pkpk_big, stretch=1)
+        big_row.addWidget(self.lbl_hscale_big)
+        layout.addLayout(big_row)
+        layout.addWidget(self.plot, stretch=1)
         self.setCentralWidget(central)
+        self.statusBar().addWidget(self.status_label, 1)
 
         self._rescan()
         if port is not None:
@@ -110,7 +163,7 @@ class MainWindow(QMainWindow):
         row.setContentsMargins(0, 0, 0, 0)
 
         self.port_combo = QComboBox()
-        self.port_combo.setMinimumWidth(160)
+        self.port_combo.setMinimumWidth(120)
         self.rescan_btn = QPushButton("Rescan")
         self.rescan_btn.clicked.connect(self._rescan)
 
@@ -135,9 +188,12 @@ class MainWindow(QMainWindow):
         self.zoom_out_btn.clicked.connect(lambda: self._zoom(2.0))
         self.fit_btn = QPushButton("Fit")
         self.fit_btn.setShortcut(QKeySequence("Ctrl+0"))
-        self.fit_btn.clicked.connect(lambda: self.plot.enableAutoRange())
+        self.fit_btn.clicked.connect(self._request_fit)
 
+        # Lives in the status bar, not this row: a long port/error message
+        # here widened the window past the screen and pushed the readout off.
         self.status_label = QLabel("not connected")
+        self.status_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
 
         row.addWidget(QLabel("Port:"))
         row.addWidget(self.port_combo)
@@ -149,9 +205,20 @@ class MainWindow(QMainWindow):
         row.addWidget(self.zoom_in_btn)
         row.addWidget(self.zoom_out_btn)
         row.addWidget(self.fit_btn)
-        row.addWidget(self.status_label, stretch=1)
+        row.addStretch(1)
 
     def _build_plot(self) -> None:
+        self.lbl_pkpk_big = QLabel("Pk-pk: –")
+        self.lbl_pkpk_big.setStyleSheet(f"color: {TRACE}; {BIG_LABEL_STYLE}")
+        # Horizontal-scale state: acquisition mode (the HS knob's button),
+        # decimation and time/div (the HS knob itself). Colour tracks the mode
+        # so a button press is visible at a glance.
+        self.lbl_hscale_big = QLabel("–")
+        self.lbl_hscale_big.setToolTip(
+            "Horizontal scale. Turn the horizontal-scale knob to change the decimation;\n"
+            "press it to cycle sampled → peak detect → high-res (CIC).")
+        self._set_hscale_colour("sampled")
+
         self.plot = pg.PlotWidget()
         self.plot.showGrid(x=True, y=True, alpha=0.3)
         self.plot.setLabel("bottom", "Time", units="s")
@@ -163,6 +230,9 @@ class MainWindow(QMainWindow):
         self._fill = pg.FillBetweenItem(self._env_upper, self._env_lower, brush=pg.mkBrush(*TRACE_FILL))
         self.plot.addItem(self._fill)
         self._midline = self.plot.plot(pen=pg.mkPen(TRACE, width=1.5))
+        for curve in (self._env_upper, self._env_lower, self._midline):
+            curve.setClipToView(True)
+            curve.setDownsampling(auto=True, method="peak")
 
         self._trig_level_line = pg.InfiniteLine(angle=0, pen=pg.mkPen(TRIG_LEVEL, style=Qt.DashLine))
         self._trig_pos_line = pg.InfiniteLine(angle=90, pen=pg.mkPen(TRIG_POS, style=Qt.DashLine))
@@ -174,8 +244,11 @@ class MainWindow(QMainWindow):
         self._no_signal = pg.TextItem("no signal", anchor=(0.5, 0.5), color="#888888")
         self.plot.addItem(self._no_signal, ignoreBounds=True)
         self.plot.getViewBox().setAutoVisible(y=True)
+        # Fit is one-shot, not continuous auto-range: continuous re-ranging
+        # chases each frame's noise, so the whole trace jumped every frame.
         self.plot.setRange(xRange=(0, 1), yRange=(-1, 1), padding=0)
-        self.plot.enableAutoRange()
+        # Fixed axis width: changing tick-label widths otherwise re-flow the layout.
+        self.plot.getAxis("left").setWidth(60)
 
     def _build_readout_dock(self) -> None:
         dock = QDockWidget("Readout", self)
@@ -185,9 +258,15 @@ class MainWindow(QMainWindow):
 
         def add_row(label: str) -> QLabel:
             value = QLabel("–")
+            # Size for the widest value up front, so the dock (sized once from
+            # its hint) doesn't clip "peak detect" or "-999.9 mV" later.
+            value.setMinimumWidth(value.fontMetrics().horizontalAdvance("-999.9 mV  "))
             form.addRow(label, value)
             return value
 
+        self.lbl_pkpk = add_row("Pk-pk")
+        self.lbl_vmax = add_row("Max")
+        self.lbl_vmin = add_row("Min")
         self.lbl_volts_div = add_row("Volts/div")
         self.lbl_time_div = add_row("Time/div")
         self.lbl_samples = add_row("Samples")
@@ -206,6 +285,10 @@ class MainWindow(QMainWindow):
         self.lbl_overrange.setStyleSheet(f"color: {WARN}; font-weight: bold;")
         self.lbl_overrange.setVisible(False)
         form.addRow(self.lbl_overrange)
+        self.lbl_gain_reduced = QLabel("over-range: gain reduced")
+        self.lbl_gain_reduced.setStyleSheet(f"color: {WARN}; font-weight: bold;")
+        self.lbl_gain_reduced.setVisible(False)
+        form.addRow(self.lbl_gain_reduced)
 
         self.lbl_last_bad = QLabel()
         self.lbl_last_bad.setStyleSheet(f"color: {WARN};")
@@ -213,7 +296,7 @@ class MainWindow(QMainWindow):
         self.lbl_last_bad.setVisible(False)
         form.addRow(self.lbl_last_bad)
 
-        dock.setWidget(panel)
+        dock.setWidget(self._scrollable(panel))
         self.addDockWidget(Qt.RightDockWidgetArea, dock)
 
     def _build_control_dock(self) -> None:
@@ -236,6 +319,14 @@ class MainWindow(QMainWindow):
         self.dec_factor_spin.setRange(0, 0xFFFF)
         self.dec_factor_spin.valueChanged.connect(self._on_timebase_changed)
         tb_form.addRow("Decimation factor", self.dec_factor_spin)
+        # Same as pressing the horizontal-scale knob's button: steps
+        # sampled -> peak detect -> high-res (CIC) -> sampled.
+        self.acq_btn = QPushButton("Mode: –")
+        self.acq_btn.setToolTip(
+            "Acquisition mode. Click to cycle sampled → peak detect → high-res (CIC),\n"
+            "the same as pressing the horizontal-scale knob.")
+        self.acq_btn.clicked.connect(self._on_acq_clicked)
+        tb_form.addRow("Acquisition", self.acq_btn)
         col.addWidget(tb_group)
 
         # -- Horizontal offset --
@@ -317,14 +408,38 @@ class MainWindow(QMainWindow):
         col.addStretch(1)
 
         self._control_widgets = [
-            self.dec_factor_spin, self.pre_spin, self.post_spin,
+            self.dec_factor_spin, self.acq_btn, self.pre_spin, self.post_spin,
             self.level_slider, self.src_combo, self.edge_combo, self.hyst_spin,
             self.atten_combo, self.preamp_combo, self.lmh_atten_spin, self.offset_slider,
             self.dc_checkbox, self.term_checkbox,
         ]
 
-        dock.setWidget(panel)
+        dock.setWidget(self._scrollable(panel))
         self.addDockWidget(Qt.LeftDockWidgetArea, dock)
+
+    @staticmethod
+    def _scrollable(panel: QWidget) -> QScrollArea:
+        # Docks otherwise demand their panel's full size, forcing the window
+        # taller/wider than small screens. Scroll instead; never scroll sideways.
+        area = QScrollArea()
+        area.setWidget(panel)
+        area.setWidgetResizable(True)
+        area.setFrameShape(QScrollArea.NoFrame)
+        area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        area.setMinimumWidth(panel.sizeHint().width() + area.verticalScrollBar().sizeHint().width())
+        return area
+
+    def _request_fit(self) -> None:
+        # Applied on the next drawn frame (or immediately if paused with data).
+        self._fit_pending = True
+        if self.latest is not None and self.pause_btn.isChecked():
+            self._apply_fit()
+
+    def _apply_fit(self) -> None:
+        self._fit_pending = False
+        # Fit the trace only: the trigger lines are infinite, and including
+        # the level line (0 V at code 512) stretched the range down to 0.
+        self.plot.getViewBox().autoRange(padding=0.1, items=[self._env_upper, self._env_lower])
 
     def _zoom(self, factor: float) -> None:
         vb = self.plot.getViewBox()
@@ -366,8 +481,10 @@ class MainWindow(QMainWindow):
         self.last_seq = None
         self.dropped = 0
         self.bad = 0
+        self.bad_kinds = {"lost": 0, "noise": 0, "other": 0}
         self.last_bad = None
         self._synced_controls = False
+        self._fit_pending = True
         self.connect_btn.setText("Disconnect")
         self.port_combo.setEnabled(False)
         self.rescan_btn.setEnabled(False)
@@ -391,13 +508,37 @@ class MainWindow(QMainWindow):
     # ---- Control -> command wiring --------------------------------------
 
     def _on_timebase_changed(self) -> None:
+        self._last_local_edit = time.monotonic()
         try:
             line = control.fmt_set_timebase(self.dec_factor_spin.value())
         except ValueError:
             return
         self._deb_timebase.submit(line)
 
+    def _current_acq(self) -> str:
+        """The mode to step from: the one just requested here if the device
+        has not had time to echo it yet, otherwise what the device reports."""
+        if (self._acq_requested is not None
+                and time.monotonic() - self._acq_requested_at <= RESYNC_QUIET_S):
+            return self._acq_requested
+        return self._acq_device
+
+    def _on_acq_clicked(self) -> None:
+        cur = self._current_acq()
+        nxt = ACQ_CYCLE[(ACQ_CYCLE.index(cur) + 1) % len(ACQ_CYCLE)]
+        # Sent immediately, not debounced: each click is a discrete step.
+        if self._send(control.fmt_set_acq(ACQ_CODE[nxt])):
+            self._acq_requested = nxt
+            self._acq_requested_at = time.monotonic()
+            self._show_acq_button(nxt)
+
+    def _show_acq_button(self, mode: str) -> None:
+        label, colour = ACQ_MODES[mode]
+        self.acq_btn.setText(label.title().replace("(Cic)", "(CIC)"))
+        self.acq_btn.setStyleSheet(f"font-weight: bold; color: {colour}; background: #101010;")
+
     def _on_hoffset_changed(self) -> None:
+        self._last_local_edit = time.monotonic()
         try:
             line = control.fmt_set_hoffset(self.pre_spin.value(), self.post_spin.value())
         except ValueError:
@@ -405,6 +546,7 @@ class MainWindow(QMainWindow):
         self._deb_hoffset.submit(line)
 
     def _on_trigger_changed(self) -> None:
+        self._last_local_edit = time.monotonic()
         try:
             line = control.fmt_set_trigger(
                 self.level_slider.value(),
@@ -417,6 +559,7 @@ class MainWindow(QMainWindow):
         self._deb_trigger.submit(line)
 
     def _on_vertical_changed(self) -> None:
+        self._last_local_edit = time.monotonic()
         try:
             line = control.fmt_set_vertical(
                 self.atten_combo.currentIndex(),
@@ -429,9 +572,11 @@ class MainWindow(QMainWindow):
         self._deb_vertical.submit(line)
 
     def _on_coupling_changed(self, dc_coupled: bool) -> None:
+        self._last_local_edit = time.monotonic()
         self._deb_coupling.submit(control.fmt_set_coupling(dc_coupled))
 
     def _on_term_changed(self, term_50r: bool) -> None:
+        self._last_local_edit = time.monotonic()
         self._deb_term.submit(control.fmt_set_term(term_50r))
 
     def _sync_controls_from_frame(self, f: Frame) -> None:
@@ -471,13 +616,25 @@ class MainWindow(QMainWindow):
                 self.last_seq = f.seq
                 if not self.pause_btn.isChecked():
                     self.latest = f
+                    self._dirty = True
                 self.frames += 1
+                key = f.settings_key()
                 if not self._synced_controls:
                     self._sync_controls_from_frame(f)
                     self._synced_controls = True
+                elif (key != self._echo_key
+                        and time.monotonic() - self._last_local_edit > RESYNC_QUIET_S):
+                    # The device's settings moved and it wasn't us: a knob was
+                    # turned or the over-range backoff stepped the gain. Follow
+                    # it, or the next command sent from here would carry the
+                    # stale divider/preamp/ladder values and undo the change.
+                    self._sync_controls_from_frame(f)
+                self._echo_key = key
             elif isinstance(event, BadEvent):
                 self.bad += 1
                 self.last_bad = event.reason
+                kind = "lost" if "bytes lost" in event.reason else "noise" if "bit errors" in event.reason else "other"
+                self.bad_kinds[kind] += 1
             elif isinstance(event, DisconnectedEvent):
                 disconnect_reason = event.reason
 
@@ -496,7 +653,9 @@ class MainWindow(QMainWindow):
             self.frames = 0
             self._fps_since = now
 
-        if self.latest is not None and not self.pause_btn.isChecked():
+        # Redraw only when a new frame arrived, not on every 16 ms tick.
+        if self._dirty and self.latest is not None and not self.pause_btn.isChecked():
+            self._dirty = False
             self._no_signal.hide()
             self._update_plot(self.latest)
             self._update_readout(self.latest)
@@ -506,24 +665,49 @@ class MainWindow(QMainWindow):
     def _update_plot(self, f: Frame) -> None:
         n = len(f.cols)
         dur = f.duration()
-        xs = [i / (n - 1) * dur for i in range(n)] if n > 1 else [0.0] * n
+        # t = 0 at the trigger sample (docs/PROTOCOL.md: "the host aligns the
+        # trace by placing entry TRIG_PTR at t = 0"). Plotting from record
+        # start instead made the wave slide whenever the pre-trigger length
+        # changed between captures.
+        frac = f.trig_fraction()
+        t0 = (frac or 0.0) * dur
+        xs = [i / (n - 1) * dur - t0 for i in range(n)] if n > 1 else [0.0] * n
         ymins = [f.code_to_volts(lo) for lo, _hi in f.cols]
         ymaxs = [f.code_to_volts(hi) for _lo, hi in f.cols]
         mids = [f.code_to_volts((lo + hi) // 2) for lo, hi in f.cols]
 
+        if ymaxs:
+            vmax, vmin = max(ymaxs), min(ymins)
+            pkpk = fmt_volts(vmax - vmin)
+            self.lbl_pkpk_big.setText(f"Pk-pk: {pkpk}")
+            self.lbl_pkpk.setText(pkpk)
+            self.lbl_vmax.setText(fmt_volts(vmax))
+            self.lbl_vmin.setText(fmt_volts(vmin))
+
         self._env_upper.setData(xs, ymaxs)
         self._env_lower.setData(xs, ymins)
         self._midline.setData(xs, mids)
+        # Re-fit when the volts or time scale changes (divider, gain,
+        # decimation): the old zoom can be 100x off and hide the trace.
+        key = (f.volts_per_count(), f.sample_period())
+        if key != self._scale_key:
+            self._scale_key = key
+            self._fit_pending = True
+        if self._fit_pending:
+            self._apply_fit()
 
         self._trig_level_line.setPos(f.code_to_volts(f.trig_level))
         self._trig_level_line.show()
 
-        frac = f.trig_fraction()
         if frac is not None:
-            self._trig_pos_line.setPos(frac * dur)
+            self._trig_pos_line.setPos(0.0)
             self._trig_pos_line.show()
         else:
             self._trig_pos_line.hide()
+
+    def _set_hscale_colour(self, mode: str) -> None:
+        _label, colour = ACQ_MODES[mode]
+        self.lbl_hscale_big.setStyleSheet(f"color: {colour}; {BIG_LABEL_STYLE}")
 
     def _update_readout(self, f: Frame) -> None:
         vpc = f.volts_per_count()
@@ -535,13 +719,22 @@ class MainWindow(QMainWindow):
         self.lbl_term.setText("50 Ω" if f.term_50r else "1 MΩ")
         self.lbl_trigger.setText("triggered" if f.triggered else "auto")
         self.lbl_prepost.setText(f"{f.pre_count} / {f.post_count}")
-        self.lbl_acq.setText("peak detect" if f.peak else "sampled")
+        self.lbl_acq.setText("peak detect" if f.peak else "high-res" if f.hires else "sampled")
+        mode = acq_mode(f)
+        self.lbl_hscale_big.setText(fmt_hscale(f))
+        self._set_hscale_colour(mode)
+        self._acq_device = mode
+        # Follow the device (a knob press, or our own request landing) unless
+        # a click from here is still waiting for its echo.
+        self._show_acq_button(self._current_acq())
         self.lbl_offset.setText(str(f.dac_offset))
         self.lbl_fps.setText(f"{self.fps:.1f}")
         self.lbl_dropped.setText(str(self.dropped))
-        self.lbl_bad.setText(str(self.bad))
+        k = self.bad_kinds
+        self.lbl_bad.setText(f"{self.bad}  (lost {k['lost']} / noise {k['noise']} / other {k['other']})" if self.bad else "0")
 
         self.lbl_overrange.setVisible(f.overrange)
+        self.lbl_gain_reduced.setVisible(f.gain_reduced)
         if self.last_bad is not None:
             self.lbl_last_bad.setText(f"last bad frame: {self.last_bad}")
             self.lbl_last_bad.setVisible(True)

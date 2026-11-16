@@ -48,6 +48,7 @@ no signs, no whitespace runs, no trailing garbage after the last field.
 | `SET_VERTICAL` | `atten` `preamp` `lmh_atten` `offset_code` | u8(0-2) u8(0-1) u8(0-10) u16(0-4095) | `afe_set()` |
 | `SET_COUPLING` | `mode` | u8(0=AC 1=DC) | `afe_set()` |
 | `SET_TERM` | `mode` | u8(0=1MOhm 1=50Ohm) | `afe_set()` |
+| `SET_ACQ` | `mode` | u8(0=sampled 1=peak 2=high-res) | `REG_MODE` b2/b3 (read-modify-write, mode-select bits kept) |
 
 `src`: 0 = level, 1 = ext, 2 = force. `edge`: 0 = rising, 1 = falling, 2 =
 either. `preamp`: 0 = low gain (18.8 dB), 1 = high gain (38.8 dB). `atten`: 0
@@ -63,6 +64,7 @@ SET_TRIGGER 512 0 0 8
 SET_VERTICAL 1 0 4 2048
 SET_COUPLING 1
 SET_TERM 0
+SET_ACQ 2
 ```
 
 ## Why plain text, not a binary/CRC frame
@@ -99,7 +101,7 @@ frame rather than waiting on a reply.
 
 ## Rate limiting
 
-`SET_TIMEBASE` / `SET_HOFFSET` / `SET_TRIGGER` write FPGA registers directly
+`SET_TIMEBASE` / `SET_HOFFSET` / `SET_TRIGGER` / `SET_ACQ` write FPGA registers directly
 through `esp32/main/live_cfg.c` and are not rate-limited in firmware — these
 are combinational register writes with no mechanical part, and the FPGA
 applies them live (see `docs/PROTOCOL.md`'s "Configure + arm": no re-arm is
@@ -114,6 +116,39 @@ an idle period, never falling indefinitely behind during a fast drag. The GUI
 also debounces slider drags client-side (`control.DebouncedSender`, 80 ms) as
 a first line of defense, but the firmware floor is what actually protects the
 relays regardless of what the client sends.
+
+## Front-panel knobs change the same settings
+
+The host is not the only writer. Two knobs move settings these commands also
+set, and the stream frame echoes the result either way:
+
+| Knob | Decoded by | Changes | Step per detent |
+|------|-----------|---------|-----------------|
+| Horizontal scale | FPGA (`settings_arbiter.sv`) | `dec_factor` | decimation doubles / halves (/1, /2, /4, ... /65536) |
+| Vertical scale | ESP32 (`vknob.c`, PCNT on `DIAL_VS_A/B`) | `atten`, `preamp`, `lmh_atten` | 2 dB of gain along the `vscale.h` ladder |
+
+The vertical ladder runs from 38.8 dB (1x, high-gain preamp, ladder 0) to
+-41.2 dB (100x, low-gain preamp, ladder 10) in 41 steps, bringing in the 10x
+and 100x relays only once the LMH6518 has no attenuation left. A knob step is
+applied through the same coalescing queue and 80 ms floor as `SET_VERTICAL`,
+so the relays are protected the same way.
+
+If the over-range backoff (`docs/PROTOCOL.md`) has lowered the gain, the knob
+steps from the backed-off gain actually in force, not from the last requested
+one, so turning it never jumps the gain back up past the level that clipped.
+
+Because the device can change under it, the GUI re-reads its control widgets
+from the stream whenever the echoed settings change and it has not edited a
+control itself in the last 0.5 s. Without that, the next `SET_VERTICAL` (which
+carries all four vertical fields) would send the GUI's stale divider, preamp
+and ladder values and undo the knob.
+
+The horizontal-scale knob's push button cycles the acquisition type
+sample -> peak detect -> high-res; the frame's `PEAK` / `HIRES` flags report
+it. `SET_ACQ` sets the same thing from the host: the GUI's Acquisition button
+in the Timebase group steps through the same cycle. `SET_ACQ 2` on an FPGA
+built without the CIC (`CAPS.b4` clear) is refused by the FPGA and the frame
+keeps reporting the old mode.
 
 ## Gaps: what a virtual dial cannot reproduce
 

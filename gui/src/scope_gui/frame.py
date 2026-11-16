@@ -22,6 +22,8 @@ MAX_COLS = 4096
 FLAG_PEAK = 1 << 0
 FLAG_TRIGGERED = 1 << 1
 FLAG_OVERRANGE = 1 << 2
+FLAG_GAIN_REDUCED = 1 << 3
+FLAG_HIRES = 1 << 4
 
 AFE_DC_COUPLED = 1 << 0
 AFE_TERM_50R = 1 << 1
@@ -80,6 +82,8 @@ class Frame:
     peak: bool
     triggered: bool
     overrange: bool
+    gain_reduced: bool
+    hires: bool
     dc_coupled: bool
     term_50r: bool
     preamp_hg: bool
@@ -103,6 +107,17 @@ class Frame:
 
     def code_to_volts(self, code: int) -> float:
         return (code - ADC_CODE_MID) * self.volts_per_count()
+
+    def settings_key(self) -> tuple:
+        """Every control setting this frame echoes back, as one comparable
+        value. Two frames with different keys mean a setting changed on the
+        device between them -- from the GUI, a front-panel knob, or the
+        over-range backoff."""
+        return (
+            self.dec_factor, self.pre_count, self.post_count, self.trig_level,
+            self.afe_atten, self.preamp_hg, self.lmh_atten, self.dac_offset,
+            self.dc_coupled, self.term_50r,
+        )
 
     def trig_fraction(self) -> float | None:
         """Trigger position as a fraction of the record, or None if the record
@@ -162,6 +177,8 @@ def parse(buf: bytes) -> Frame:
         peak=bool(flags & FLAG_PEAK),
         triggered=bool(flags & FLAG_TRIGGERED),
         overrange=bool(flags & FLAG_OVERRANGE),
+        gain_reduced=bool(flags & FLAG_GAIN_REDUCED),
+        hires=bool(flags & FLAG_HIRES),
         dc_coupled=bool(afe_flags & AFE_DC_COUPLED),
         term_50r=bool(afe_flags & AFE_TERM_50R),
         preamp_hg=bool(afe_flags & AFE_PREAMP_HG),

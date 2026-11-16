@@ -4,7 +4,8 @@
  *              turnaround byte and ID/VERSION values, little-endian multi-byte
  *              config read-back from a stubbed effective-config bundle, that
  *              writes emit host_wr strobes with an auto-incrementing address, and
- *              that a REC_DATA burst pops the record stream in order.
+ *              that a REC_DATA burst pops the record stream in order, including
+ *              past 256 bytes.
  * Author: Avery Lor
  * Date: Aug 30 2026
  */
@@ -70,7 +71,7 @@ module tb_spi_protocol;
         .rx_byte(rx_byte), .rx_stb(rx_stb), .bit_pos(bit_pos), .tx_byte(tx_byte),
         .sta(sta), .irq_level(irq_level), .cfg_rb(cfg_rb),
         .probe_div_rb(probe_div_rb), .probe_en_rb(probe_en_rb),
-        .caps(8'h0B), .buf_depth(16'd16384),
+        .caps(8'h0B), .buf_depth(16'd16384), .alarm(2'b10),
         .enc_hs_cnt(16'd0), .enc_ho_cnt(16'd0), .enc_tg_cnt(16'd0),
         .enc_btn(6'd0), .enc_btn_rd(enc_btn_rd),
         .rec_byte(rec_byte), .rec_done(1'b0), .rec_underflow(1'b0), .rec_advance(rec_advance),
@@ -90,7 +91,7 @@ module tb_spi_protocol;
         mst.xfer_byte(8'h00, d); `EXPECT_EQ(d, 8'h53, "ID0 = 'S'");
         mst.xfer_byte(8'h00, d); `EXPECT_EQ(d, 8'h43, "ID1 = 'C'");
         mst.xfer_byte(8'h00, d); `EXPECT_EQ(d, 8'h01, "VER_MAJ = 1");
-        mst.xfer_byte(8'h00, d); `EXPECT_EQ(d, 8'h00, "VER_MIN = 0");
+        mst.xfer_byte(8'h00, d); `EXPECT_EQ(d, 8'h01, "VER_MIN = 1");
         mst.cs_hi();
 
         // --- Read TRIG_LEVEL_L/H (little-endian 0x123) ---
@@ -121,6 +122,17 @@ module tb_spi_protocol;
         for (i = 0; i < 4; i = i + 1) begin
             mst.xfer_byte(8'h00, d);
             `EXPECT_EQ(d, 8'h10 + i, "record byte in order");
+        end
+        mst.cs_hi();
+
+        // --- Long REC_DATA burst: the slot counter must not wrap at 256 and
+        // drop back into header/turnaround slots (0x00, no advance) ---
+        mst.cs_lo();
+        mst.xfer_byte(8'h80 | 7'h40, d);
+        mst.xfer_byte(8'h00, d);
+        for (i = 0; i < 512; i = i + 1) begin
+            mst.xfer_byte(8'h00, d);
+            `EXPECT_EQ(d, 8'(8'h14 + i), "long-burst record byte in order");
         end
         mst.cs_hi();
 

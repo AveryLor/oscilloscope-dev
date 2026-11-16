@@ -28,3 +28,8 @@ void live_cfg_get_acq(scope_acq_cfg_t *out);
 esp_err_t live_cfg_set_dec_factor(uint16_t dec_factor);
 esp_err_t live_cfg_set_hoffset(uint16_t pre_count, uint16_t post_count);
 esp_err_t live_cfg_set_trigger(uint16_t level, uint8_t src, uint8_t edge, uint8_t hyst);
+
+/* Select the acquisition type (MODE.b2 peak / MODE.b3 high-res) without
+ * touching MODE's normal/auto/single bits. The FPGA refuses high-res when it
+ * was built without the CIC; the stream frame's flags show what took. */
+esp_err_t live_cfg_set_acq(bool peak, bool hires);

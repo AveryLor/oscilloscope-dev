@@ -55,6 +55,8 @@ package scope_pkg;
     // Fields are plain vectors (not enum-typed) so the struct stays a simple
     // packed bit bundle for CDC.
     typedef struct packed {
+        logic [7:0]             or_thr;       // over-range trip threshold, /256 of window
+        logic [4:0]             or_win;       // over-range window, log2(samples)
         logic [31:0]            auto_timeout; // capture-tick auto-trigger timeout
         logic [SCOPE_CNT_W-1:0] post_count;   // samples written after the trigger
         logic [SCOPE_CNT_W-1:0] pre_count;    // samples guaranteed before trigger
@@ -66,6 +68,7 @@ package scope_pkg;
         logic                   auto_rearm;   // re-arm automatically after a dump
         logic                   invert_en;    // apply the VIN+/VIN- code inversion
         logic                   peak_en;      // min/max peak-detect decimation
+        logic                   hires_en;     // CIC high-res decimation (peak_en wins)
         logic [1:0]             mode;         // acq_mode_e
     } scope_cfg_t;
 

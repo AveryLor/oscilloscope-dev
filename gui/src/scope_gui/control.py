@@ -1,4 +1,4 @@
-"""Host -> ESP32 control commands: formats the six SET_* lines documented in
+"""Host -> ESP32 control commands: formats the seven SET_* lines documented in
 docs/CONTROL.md and matched by esp32/main/cmd_parse.c, plus a small debounce
 helper so a dragged slider doesn't flood the link with one line per pixel.
 
@@ -52,6 +52,17 @@ def fmt_set_coupling(dc_coupled: bool) -> str:
 
 def fmt_set_term(term_50r: bool) -> str:
     return f"SET_TERM {1 if term_50r else 0}"
+
+
+# SET_ACQ values, in the order the horizontal-scale knob's button cycles them.
+ACQ_SAMPLED = 0
+ACQ_PEAK = 1
+ACQ_HIRES = 2
+
+
+def fmt_set_acq(mode: int) -> str:
+    _check_range("mode", mode, ACQ_SAMPLED, ACQ_HIRES)
+    return f"SET_ACQ {mode}"
 
 
 class DebouncedSender:

@@ -32,7 +32,8 @@
 #define PIN_RELAY_DC_COUP   25 /* P25 */
 #define PIN_RELAY_50_OHM    26 /* P26 */
 
-/* Vertical encoders (ESP32) */
+/* Vertical encoders (ESP32). DIAL_VS_A/B are decoded by vknob.c; the VS
+ * button and the DIAL_VO_* encoder have no driver yet. */
 #define PIN_DIAL_VS_A   36 /* SVP */
 #define PIN_DIAL_VS_B   39 /* SVN */
 #define PIN_DIAL_VS_BTN 34 /* P34 */
@@ -42,5 +43,9 @@
 
 /* J5 future trigger module — FLEX_1/2 used for DIAL_VO_* */
 #define PIN_ESP_FLEX_3 27 /* P27; not an SPI controller pin */
+/* Over-range alarm from the FPGA: jumper J4-3 (FPGA_FLEX_1) to J5-5
+ * (ESP_FLEX_3). Active-high level; internal pull-down so an unfitted wire
+ * reads as no alarm and the firmware falls back to polling REG_ALARM. */
+#define PIN_FPGA_ALARM PIN_ESP_FLEX_3
 
 /* Reserved: GPIO1/3 USB-UART, GPIO6–11 flash, GPIO0/2/12 strapping */
