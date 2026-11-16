@@ -23,6 +23,7 @@
 typedef struct {
     uint8_t  mode;          // MODE_NORMAL / MODE_AUTO / MODE_SINGLE
     bool     peak_detect;   // MODE_PEAK_EN
+    bool     hires;         // MODE_HIRES_EN (ignored unless CAPS_HIRES)
     uint8_t  trig_src;      // TRIGCFG_SRC_LEVEL / _EXT / _FORCE
     uint8_t  trig_edge;     // TRIGCFG_EDGE_RISING / _FALLING / _EITHER (unshifted)
     uint16_t trig_level;    // 10-bit code
@@ -50,8 +51,36 @@ esp_err_t fpga_link_read8(uint8_t addr, uint8_t *value);
 /* True once REG_ID0/ID1 read back 'S'/'C' and STATUS reports the PLL locked. */
 bool fpga_link_present(void);
 
-/* Serialise cfg into the FPGA registers and set CONTROL.ARM. */
+/* Serialise cfg into the FPGA registers and set CONTROL.ARM. Use once at
+ * boot (or to deliberately reset every setting): it overwrites whatever the
+ * FPGA knobs have done since. */
 esp_err_t scope_arm(const scope_acq_cfg_t *cfg);
+
+/* Re-arm after a dump without touching any acquisition setting: writes only
+ * the CONTROL level bits (invert_en, auto_rearm) plus ARM. The FPGA registers
+ * stay the single source of truth, so knob turns and the HS-button mode cycle
+ * survive every capture. */
+esp_err_t scope_rearm(const scope_acq_cfg_t *cfg);
+
+/* Read the effective acquisition settings back from the FPGA (MODE through
+ * POST_COUNT in one burst). Fields not held in that range keep their value. */
+esp_err_t scope_read_effective(scope_acq_cfg_t *cfg);
+
+/* Over-range protection. read: ALARM register (ALARM_OR_TRIP | ALARM_OR_ACTIVE).
+ * clear: acknowledge the sticky trip. cfg: window log2 and /256 threshold. */
+esp_err_t scope_alarm_read(uint8_t *alarm);
+
+/* Block until the FPGA_ALARM line is high (or rises) or timeout_ms passes.
+ * ESP_ERR_TIMEOUT if neither: callers then poll REG_ALARM as a fallback, so
+ * the firmware works with or without the J4-3 -> J5-5 jumper. */
+esp_err_t scope_wait_alarm(uint32_t timeout_ms);
+
+/* Write CONTROL W1 bits (IRQ_CLR, REC_REWIND, ...) while preserving the
+ * level bits last set by scope_arm / scope_rearm. Use this for every
+ * one-shot CONTROL write. */
+esp_err_t fpga_control_strobe(uint8_t w1_bits);
+esp_err_t scope_alarm_clear(void);
+esp_err_t scope_or_protect_cfg(uint8_t win_log2, uint8_t thr);
 
 /* Block until FPGA_IRQ asserts (or timeout_ms elapses). Returns ESP_OK when a
  * record is ready, ESP_ERR_TIMEOUT otherwise. */

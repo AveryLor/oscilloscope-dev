@@ -25,9 +25,16 @@ static const char *TAG = "fpga_link";
 
 static spi_device_handle_t s_spi;
 static SemaphoreHandle_t s_irq_sem;
+static SemaphoreHandle_t s_alarm_sem;
+// CONTROL level bits (INVERT_EN, AUTO_REARM) last written. Every CONTROL
+// write carries them, because the FPGA latches the level bits from *every*
+// CONTROL write: a bare IRQ_CLR or REC_REWIND would otherwise switch the
+// VIN+/VIN- correction off until the next arm.
+static uint8_t s_ctrl_level = CTRL_INVERT_EN; // matches the FPGA reset default
 static bool s_ready;
-// Serialises every FPGA SPI transaction. scope_stream (readout) and cmd_rx
-// (live SET_TIMEBASE/SET_HOFFSET/SET_TRIGGER writes) share s_spi, and
+// Serialises every FPGA SPI transaction. scope_stream (readout), cmd_rx
+// (live SET_TIMEBASE/SET_HOFFSET/SET_TRIGGER writes) and or_protect (alarm
+// poll/ack) share s_spi, and
 // spi_device_polling_transmit is not safe to call on one device from two
 // tasks at once: a collision could fail or panic and reboot the ESP32.
 static SemaphoreHandle_t s_spi_lock;
@@ -44,6 +51,16 @@ static void IRAM_ATTR fpga_irq_isr(void *arg) {
   (void)arg;
   BaseType_t hp = pdFALSE;
   xSemaphoreGiveFromISR(s_irq_sem, &hp);
+  if (hp) {
+    portYIELD_FROM_ISR();
+  }
+}
+
+// Over-range alarm edge (optional jumper J4-3 -> J5-5).
+static void IRAM_ATTR fpga_alarm_isr(void *arg) {
+  (void)arg;
+  BaseType_t hp = pdFALSE;
+  xSemaphoreGiveFromISR(s_alarm_sem, &hp);
   if (hp) {
     portYIELD_FROM_ISR();
   }
@@ -80,7 +97,8 @@ static esp_err_t fpga_link_spi_init(void) {
 
 static esp_err_t fpga_link_irq_init(void) {
   s_irq_sem = xSemaphoreCreateBinary();
-  if (s_irq_sem == NULL) {
+  s_alarm_sem = xSemaphoreCreateBinary();
+  if (s_irq_sem == NULL || s_alarm_sem == NULL) {
     return ESP_ERR_NO_MEM;
   }
 
@@ -96,11 +114,22 @@ static esp_err_t fpga_link_irq_init(void) {
     return err;
   }
 
+  gpio_config_t al = io;
+  al.pin_bit_mask = 1ULL << PIN_FPGA_ALARM;
+  err = gpio_config(&al);
+  if (err != ESP_OK) {
+    return err;
+  }
+
   err = gpio_install_isr_service(0);
   if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
     return err; // INVALID_STATE = another driver already installed it
   }
-  return gpio_isr_handler_add(PIN_FPGA_IRQ, fpga_irq_isr, NULL);
+  err = gpio_isr_handler_add(PIN_FPGA_IRQ, fpga_irq_isr, NULL);
+  if (err != ESP_OK) {
+    return err;
+  }
+  return gpio_isr_handler_add(PIN_FPGA_ALARM, fpga_alarm_isr, NULL);
 }
 
 esp_err_t fpga_link_write_reg(uint8_t addr, const uint8_t *data, size_t len) {
@@ -199,8 +228,9 @@ esp_err_t scope_arm(const scope_acq_cfg_t *cfg) {
     return ESP_ERR_INVALID_ARG;
   }
 
-  const uint8_t mode =
-      (cfg->mode & MODE_SEL_MASK) | (cfg->peak_detect ? MODE_PEAK_EN : 0);
+  const uint8_t mode = (cfg->mode & MODE_SEL_MASK) |
+                       (cfg->peak_detect ? MODE_PEAK_EN : 0) |
+                       (cfg->hires ? MODE_HIRES_EN : 0);
   const uint8_t trig =
       (cfg->trig_src & TRIGCFG_SRC_MASK) |
       ((cfg->trig_edge << TRIGCFG_EDGE_SHIFT) & TRIGCFG_EDGE_MASK);
@@ -226,12 +256,75 @@ esp_err_t scope_arm(const scope_acq_cfg_t *cfg) {
   CHK(fpga_link_write_reg(REG_PRE_COUNT_L, pre, 2));
   CHK(fpga_link_write_reg(REG_POST_COUNT_L, post, 2));
   CHK(fpga_link_write_reg(REG_AUTO_TMO_0, tmo, 4));
+  s_ctrl_level = control;
   CHK(fpga_link_write8(REG_CONTROL, control)); // level bits first
   CHK(fpga_link_write8(REG_CONTROL,
                        control | CTRL_ARM)); // then the arm one-shot
 
   xSemaphoreTake(s_irq_sem, 0); // drop any stale give
   return ESP_OK;
+}
+
+esp_err_t fpga_control_strobe(uint8_t w1_bits) {
+  return fpga_link_write8(REG_CONTROL, (uint8_t)(s_ctrl_level | w1_bits));
+}
+
+esp_err_t scope_wait_alarm(uint32_t timeout_ms) {
+  if (gpio_get_level(PIN_FPGA_ALARM)) {
+    return ESP_OK;
+  }
+  return xSemaphoreTake(s_alarm_sem, pdMS_TO_TICKS(timeout_ms)) == pdTRUE
+             ? ESP_OK
+             : ESP_ERR_TIMEOUT;
+}
+
+esp_err_t scope_rearm(const scope_acq_cfg_t *cfg) {
+  if (cfg == NULL) {
+    return ESP_ERR_INVALID_ARG;
+  }
+  const uint8_t control = (cfg->auto_rearm ? CTRL_AUTO_REARM : 0) |
+                          (cfg->invert_en ? CTRL_INVERT_EN : 0);
+  s_ctrl_level = control;
+  CHK(fpga_link_write8(REG_CONTROL, control | CTRL_ARM));
+  xSemaphoreTake(s_irq_sem, 0); // drop any stale give
+  return ESP_OK;
+}
+
+esp_err_t scope_read_effective(scope_acq_cfg_t *cfg) {
+  if (cfg == NULL) {
+    return ESP_ERR_INVALID_ARG;
+  }
+  // REG_MODE (0x09) .. REG_POST_COUNT_H (0x17): one contiguous burst.
+  uint8_t r[REG_POST_COUNT_H - REG_MODE + 1];
+  CHK(fpga_link_read_reg(REG_MODE, r, sizeof(r)));
+#define AT(reg) r[(reg) - REG_MODE]
+  const uint8_t mode = AT(REG_MODE);
+  const uint8_t trig = AT(REG_TRIG_CFG);
+  cfg->mode        = mode & MODE_SEL_MASK;
+  cfg->peak_detect = (mode & MODE_PEAK_EN) != 0;
+  cfg->hires       = (mode & MODE_HIRES_EN) != 0;
+  cfg->trig_src    = trig & TRIGCFG_SRC_MASK;
+  cfg->trig_edge   = (trig & TRIGCFG_EDGE_MASK) >> TRIGCFG_EDGE_SHIFT;
+  cfg->trig_level  = (uint16_t)(AT(REG_TRIG_LEVEL_L) | (AT(REG_TRIG_LEVEL_H) << 8));
+  cfg->trig_hyst   = AT(REG_TRIG_HYST);
+  cfg->dec_factor  = (uint16_t)(AT(REG_DEC_FACTOR_L) | (AT(REG_DEC_FACTOR_H) << 8));
+  cfg->pre_count   = (uint16_t)(AT(REG_PRE_COUNT_L) | (AT(REG_PRE_COUNT_H) << 8));
+  cfg->post_count  = (uint16_t)(AT(REG_POST_COUNT_L) | (AT(REG_POST_COUNT_H) << 8));
+#undef AT
+  return ESP_OK;
+}
+
+esp_err_t scope_alarm_read(uint8_t *alarm) {
+  return fpga_link_read8(REG_ALARM, alarm);
+}
+
+esp_err_t scope_alarm_clear(void) {
+  return fpga_link_write8(REG_ALARM_CTL, ALARMCTL_OR_CLR);
+}
+
+esp_err_t scope_or_protect_cfg(uint8_t win_log2, uint8_t thr) {
+  const uint8_t r[2] = {win_log2, thr};
+  return fpga_link_write_reg(REG_OR_WIN, r, sizeof(r));
 }
 
 esp_err_t scope_wait_ready(uint32_t timeout_ms) {
@@ -282,7 +375,7 @@ esp_err_t scope_read_record(scope_sample_t *out, size_t max_samples,
   }
 
   // Restart the FPGA-side stream, then read 2 * n bytes from REG_REC_DATA
-  err = fpga_link_write8(REG_CONTROL, CTRL_REC_REWIND);
+  err = fpga_control_strobe(CTRL_REC_REWIND);
   if (err != ESP_OK) {
     return err;
   }
@@ -305,7 +398,7 @@ esp_err_t scope_read_record(scope_sample_t *out, size_t max_samples,
   }
   *n_out = got;
 
-  (void)fpga_link_write8(REG_CONTROL, CTRL_IRQ_CLR);
+  (void)fpga_control_strobe(CTRL_IRQ_CLR);
   return ESP_OK;
 }
 
@@ -324,7 +417,7 @@ esp_err_t scope_read_envelope(scope_envelope_t *env, size_t n_cols) {
   if (n > SCOPE_REC_MAX_SAMPLES) {
     // Reading a garbage count to completion would spin this task for
     // hours and trip the task watchdog; bail so the caller can back off.
-    (void)fpga_link_write8(REG_CONTROL, CTRL_IRQ_CLR);
+    (void)fpga_control_strobe(CTRL_IRQ_CLR);
     return ESP_ERR_INVALID_SIZE;
   }
 
@@ -345,11 +438,11 @@ esp_err_t scope_read_envelope(scope_envelope_t *env, size_t n_cols) {
   envelope_begin(&acc, env->ymin, env->ymax, n_cols, n, SCOPE_CODE_MID);
 
   if (n == 0) {
-    (void)fpga_link_write8(REG_CONTROL, CTRL_IRQ_CLR);
+    (void)fpga_control_strobe(CTRL_IRQ_CLR);
     return ESP_OK;
   }
 
-  err = fpga_link_write8(REG_CONTROL, CTRL_REC_REWIND);
+  err = fpga_control_strobe(CTRL_REC_REWIND);
   if (err != ESP_OK) {
     return err;
   }
@@ -379,6 +472,6 @@ esp_err_t scope_read_envelope(scope_envelope_t *env, size_t n_cols) {
   }
   envelope_finish(&acc);
 
-  (void)fpga_link_write8(REG_CONTROL, CTRL_IRQ_CLR);
+  (void)fpga_control_strobe(CTRL_IRQ_CLR);
   return ESP_OK;
 }

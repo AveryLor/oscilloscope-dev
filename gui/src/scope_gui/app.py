@@ -232,6 +232,10 @@ class MainWindow(QMainWindow):
         self.lbl_overrange.setStyleSheet(f"color: {WARN}; font-weight: bold;")
         self.lbl_overrange.setVisible(False)
         form.addRow(self.lbl_overrange)
+        self.lbl_gain_reduced = QLabel("over-range: gain reduced")
+        self.lbl_gain_reduced.setStyleSheet(f"color: {WARN}; font-weight: bold;")
+        self.lbl_gain_reduced.setVisible(False)
+        form.addRow(self.lbl_gain_reduced)
 
         self.lbl_last_bad = QLabel()
         self.lbl_last_bad.setStyleSheet(f"color: {WARN};")
@@ -613,7 +617,7 @@ class MainWindow(QMainWindow):
         self.lbl_term.setText("50 Ω" if f.term_50r else "1 MΩ")
         self.lbl_trigger.setText("triggered" if f.triggered else "auto")
         self.lbl_prepost.setText(f"{f.pre_count} / {f.post_count}")
-        self.lbl_acq.setText("peak detect" if f.peak else "sampled")
+        self.lbl_acq.setText("peak detect" if f.peak else "high-res" if f.hires else "sampled")
         self.lbl_offset.setText(str(f.dac_offset))
         self.lbl_fps.setText(f"{self.fps:.1f}")
         self.lbl_dropped.setText(str(self.dropped))
@@ -621,6 +625,7 @@ class MainWindow(QMainWindow):
         self.lbl_bad.setText(f"{self.bad}  (lost {k['lost']} / noise {k['noise']} / other {k['other']})" if self.bad else "0")
 
         self.lbl_overrange.setVisible(f.overrange)
+        self.lbl_gain_reduced.setVisible(f.gain_reduced)
         if self.last_bad is not None:
             self.lbl_last_bad.setText(f"last bad frame: {self.last_bad}")
             self.lbl_last_bad.setVisible(True)

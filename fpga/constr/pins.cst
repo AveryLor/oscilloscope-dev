@@ -46,14 +46,15 @@ IO_PORT "adc_or" IO_TYPE=LVCMOS25UD33 PULL_MODE=NONE;
 IO_LOC  "hw_trigger" 72;
 IO_PORT "hw_trigger" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 
-IO_LOC  "fpga_flex[0]" 71;
+// FPGA_FLEX_1 (J4-3): over-range alarm output, jumper to J5-5 (ESP_FLEX_3).
+IO_LOC  "fpga_alarm" 71;
+IO_PORT "fpga_alarm" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+
+IO_LOC  "fpga_flex[0]" 53;
 IO_PORT "fpga_flex[0]" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 
-IO_LOC  "fpga_flex[1]" 53;
+IO_LOC  "fpga_flex[1]" 52;
 IO_PORT "fpga_flex[1]" IO_TYPE=LVCMOS33 PULL_MODE=UP;
-
-IO_LOC  "fpga_flex[2]" 52;
-IO_PORT "fpga_flex[2]" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 
 // J6 firmware map (finish in Altium): ESP32 SPI slave
 IO_LOC  "spi_sclk" 27;

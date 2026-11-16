@@ -30,7 +30,8 @@ module tb_top;
     logic       fpga_irq;
     logic       probe_comp;
     logic       hw_trigger = 1'b0;
-    logic [2:0] fpga_flex  = 3'b000;
+    logic [1:0] fpga_flex  = 2'b00;
+    logic       fpga_alarm;
     logic       dhs_a=1,dhs_b=1,dhs_btn=1, dho_a=1,dho_b=1,dho_btn=1, dtg_a=1,dtg_b=1,dtg_btn=1;
 
     adc_waveform_src #(.PERIOD(220)) u_src (
@@ -39,7 +40,8 @@ module tb_top;
 
     // AD9215 output delay: tOD = 4.8 ns typical after the encode edge.
     assign #4.8 adc_d  = adc_d_src;
-    assign #4.8 adc_or = adc_or_src;
+    logic or_force = 1'b0;   // drive a sustained over-range for the alarm test
+    assign #4.8 adc_or = adc_or_src | or_force;
 
     spi_master_bfm #(.SCLK_NS(40.0)) mst (
         .sclk(spi_sclk), .cs_n(spi_cs), .mosi(spi_mosi), .miso(spi_miso));
@@ -52,7 +54,7 @@ module tb_top;
         .dial_hs_a(dhs_a), .dial_hs_b(dhs_b), .dial_hs_btn(dhs_btn),
         .dial_ho_a(dho_a), .dial_ho_b(dho_b), .dial_ho_btn(dho_btn),
         .dial_tg_a(dtg_a), .dial_tg_b(dtg_b), .dial_tg_btn(dtg_btn),
-        .probe_comp(probe_comp), .fpga_flex(fpga_flex));
+        .probe_comp(probe_comp), .fpga_alarm(fpga_alarm), .fpga_flex(fpga_flex));
 
     logic [7:0] d;
 
@@ -145,6 +147,26 @@ module tb_top;
         reg_write(7'h08, 8'h20);           // CONTROL.IRQ_CLR
         repeat (20) @(posedge clk); #1;
         `EXPECT_EQ(fpga_irq, 1'b0, "fpga_irq cleared after IRQ_CLR");
+
+        // ---- Over-range protection end to end --------------------------------
+        // Shortest window (2**10 samples, ~10 us) with the default 16/256
+        // threshold: a sustained OR must set REG_ALARM.b0 and drive the
+        // fpga_alarm pin; ALARM_CTL.b0 must clear both once OR stops.
+        reg_write(7'h12, 8'd10);                 // OR_WIN = 10
+        reg_read(7'h2D, d);
+        `EXPECT_EQ(d[0], 1'b0, "ALARM clear before over-range");
+        or_force = 1'b1;
+        #30000;                                  // ~3 windows of solid OR
+        `EXPECT_EQ(fpga_alarm, 1'b1, "fpga_alarm pin high on sustained OR");
+        reg_read(7'h2D, d);
+        `EXPECT_EQ(d[0], 1'b1, "ALARM.b0 set on sustained OR");
+        or_force = 1'b0;
+        #25000;                                  // let a clean window pass
+        reg_write(7'h1F, 8'h01);                 // ALARM_CTL.OR_CLR
+        #2000;
+        reg_read(7'h2D, d);
+        `EXPECT_EQ(d[0], 1'b0, "ALARM.b0 cleared by ALARM_CTL");
+        `EXPECT_EQ(fpga_alarm, 1'b0, "fpga_alarm pin low after clear");
 
         `TB_FINISH("tb_top");
     end

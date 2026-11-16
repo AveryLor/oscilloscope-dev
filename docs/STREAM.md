@@ -86,6 +86,8 @@ followed by a 4-byte CRC.
 | 0 | `PEAK` | record came from peak-detect mode |
 | 1 | `TRIGGERED` | a real trigger fired; clear means an AUTO timeout |
 | 2 | `OVERRANGE` | at least one sample in the record clipped |
+| 3 | `GAIN_REDUCED` | over-range protection has lowered the front-end gain; cleared by the next vertical change |
+| 4 | `HIRES` | record came from high-res (CIC) decimation |
 
 ### `afe_flags`
 

@@ -47,5 +47,14 @@ esp_err_t afe_init(void);
 /* Apply a full front-end configuration in one call. */
 esp_err_t afe_set(const afe_config_t *cfg);
 
-/* Copy out the configuration currently applied. */
+/* Copy out the configuration currently applied (including any backoff). */
 void afe_get(afe_config_t *out);
+
+/* Over-range protection: reduce front-end gain by one step (preamp HG->LG,
+ * then LMH6518 ladder, then input divider if the relays are enabled).
+ * ESP_ERR_NOT_FOUND means the front end is already at minimum gain. The
+ * backoff persists until the next afe_set (a deliberate user change). */
+esp_err_t afe_protect_step(void);
+
+/* True while an over-range backoff is in effect. */
+bool afe_backoff_active(void);
