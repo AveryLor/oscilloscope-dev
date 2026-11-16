@@ -4,7 +4,9 @@
  *              triangle ADC source feed top; the SPI master BFM configures a
  *              force-only / AUTO capture, arms it, waits for fpga_irq, then reads
  *              STATUS, SAMPLE_COUNT and a run of REC_DATA and checks the record
- *              is the right length and decodes to in-range codes.
+ *              is the right length and decodes to in-range codes. Then the
+ *              over-range alarm, and a high-res (CIC) capture: CAPS advertises
+ *              it, MODE selects it, and the record is the smoothed triangle.
  * Author: Avery Lor
  * Date: Aug 30 2026
  */
@@ -77,6 +79,8 @@ module tb_top;
     logic [7:0] lo, hi;
     logic [9:0] code;
     logic       all_in_range, any_non_pad;
+    logic       hr_smooth, hr_flags_ok;
+    integer     prev_code, step;
 
     initial begin
         // Let the PLL lock and POR release.
@@ -167,6 +171,55 @@ module tb_top;
         reg_read(7'h2D, d);
         `EXPECT_EQ(d[0], 1'b0, "ALARM.b0 cleared by ALARM_CTL");
         `EXPECT_EQ(fpga_alarm, 1'b0, "fpga_alarm pin low after clear");
+
+        // ---- High-res (CIC) capture end to end -------------------------------
+        reg_read(7'h04, d);
+        `EXPECT(d[CAPS_HIRES_BIT] === 1'b1, "CAPS advertises the high-res decimator");
+        reg_write(7'h09, 8'h09);                 // MODE = AUTO | HIRES
+        reg_read(7'h09, d);
+        `EXPECT_EQ(d, 8'h09, "MODE reads back with high-res set");
+        reg_write(7'h10, 8'd3);                  // DEC_FACTOR = 3 -> /4
+        reg_write(7'h08, 8'h01);                 // ARM (re-arm from FROZEN)
+
+        fork
+            begin : wait_irq_hr
+                @(posedge fpga_irq);
+            end
+            begin : irq_timeout_hr
+                #500000;
+                `EXPECT(1'b0, "timed out waiting for the high-res capture");
+            end
+        join_any
+        disable irq_timeout_hr;
+        disable wait_irq_hr;
+
+        n = 0;
+        reg_read(7'h21, d); n = n | (d << 0);
+        reg_read(7'h22, d); n = n | (d << 8);
+        `EXPECT_EQ(n, PRE + POST, "high-res record length = PRE + POST");
+
+        // The source is a triangle from 64 to 960 with a slope of ~8 codes per
+        // clock. Averaged over /4 windows it must stay inside that span and
+        // move by at most ~33 codes per entry: a wrong gain, a start-up sample
+        // or a broken divider all break one of the two.
+        reg_write(7'h08, 8'h40);                 // CONTROL.REC_REWIND
+        hr_smooth   = 1'b1;
+        hr_flags_ok = 1'b1;
+        prev_code   = -1;
+        for (int e = 0; e < PRE + POST; e++) begin
+            reg_read(7'h40, lo);
+            reg_read(7'h40, hi);
+            code = {hi[1:0], lo};
+            if (hi[7] !== 1'b0 || hi[5:2] !== 4'b0000) hr_flags_ok = 1'b0;
+            if (code < 10'd60 || code > 10'd964) hr_smooth = 1'b0;
+            if (prev_code >= 0) begin
+                step = int'(code) - prev_code;
+                if (step > 40 || step < -40) hr_smooth = 1'b0;
+            end
+            prev_code = int'(code);
+        end
+        `EXPECT(hr_smooth, "high-res record is the smoothed triangle at unity gain");
+        `EXPECT(hr_flags_ok, "high-res entries carry is_max = 0 and clear spare bits");
 
         `TB_FINISH("tb_top");
     end

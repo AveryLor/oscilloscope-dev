@@ -32,7 +32,8 @@
 #define PIN_RELAY_DC_COUP   25 /* P25 */
 #define PIN_RELAY_50_OHM    26 /* P26 */
 
-/* Vertical encoders (ESP32) */
+/* Vertical encoders (ESP32). DIAL_VS_A/B are decoded by vknob.c; the VS
+ * button and the DIAL_VO_* encoder have no driver yet. */
 #define PIN_DIAL_VS_A   36 /* SVP */
 #define PIN_DIAL_VS_B   39 /* SVN */
 #define PIN_DIAL_VS_BTN 34 /* P34 */

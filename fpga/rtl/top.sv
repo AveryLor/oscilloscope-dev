@@ -19,9 +19,10 @@ module top
     // The PCB routes AD9215 VIN+/VIN- swapped. With this set, CONTROL.INVERT_EN
     // resets to 1, so codes are correct even before the ESP32 configures us.
     parameter bit ADC_VIN_SWAPPED = 1'b1,
-    // Set when a CIC high-res decimator is instantiated (adds it to the
-    // HS-button mode cycle and to CAPS).
-    parameter bit HIRES_AVAIL     = 1'b0
+    // Build the CIC high-res decimator (adds it to the HS-button mode cycle
+    // and to CAPS). 0 removes the filter and leaves sample / peak only.
+    parameter bit HIRES_AVAIL     = 1'b1,
+    parameter int CIC_STAGES      = 2
 ) (
     input  logic       clk,
     input  logic       fpga_clk,
@@ -337,15 +338,74 @@ module top
     logic              buf_rd_en;
     logic [SCOPE_DW-1:0] buf_rd_data;
 
+    // ---- High-res path: CIC decimator in parallel with u_decim ---------------
+    // MODE selects which decimator feeds the buffer. Peak wins if a host sets
+    // both bits (settings_arbiter already enforces that; this keeps the mux
+    // safe on its own).
+    logic use_cic;
+    assign use_cic = HIRES_AVAIL && cfg_cap.hires_en && !cfg_cap.peak_en;
+
+    // Must match cic_decimator's PIPE_LATENCY (tb_cic_decimator checks it).
+    localparam int CIC_LAT = CIC_STAGES + SCOPE_CODE_W + 1;
+
+    logic [9:0] cic_sample;
+    logic       cic_or, cic_valid;
+    logic       trig_dly;
+
+    generate
+        if (HIRES_AVAIL) begin : g_cic
+            cic_decimator #(.STAGES(CIC_STAGES)) u_cic (
+                .clk            (adc_sample_clk),
+                .rst_n          (rst_cap_n),
+                .enable         (use_cic),
+                .cfg_dec_factor (cfg_cap.dec_factor),
+                .arm_align      (fsm_arm_align),
+                .sample_in      (cond_sample),
+                .or_in          (cond_or),
+                .valid_in       (cond_valid),
+                .sample_out     (cic_sample),
+                .or_out         (cic_or),
+                .valid_out      (cic_valid)
+            );
+
+            // The CIC output lags u_decim by CIC_LAT clocks, so the trigger
+            // marker is delayed by the same amount to stay on the same sample.
+            // Cleared at every fill start/abort so a stale pulse can never
+            // mark a new record.
+            logic [CIC_LAT-1:0] trig_sr;
+            always_ff @(posedge adc_sample_clk or negedge rst_cap_n) begin
+                if (!rst_cap_n)                          trig_sr <= '0;
+                else if (fsm_buf_start || fsm_buf_abort) trig_sr <= '0;
+                else trig_sr <= {trig_sr[CIC_LAT-2:0], trig_pulse};
+            end
+            assign trig_dly = trig_sr[CIC_LAT-1];
+        end else begin : g_no_cic
+            assign cic_sample = '0;
+            assign cic_or     = 1'b0;
+            assign cic_valid  = 1'b0;
+            assign trig_dly   = 1'b0;
+        end
+    endgenerate
+
+    logic                buf_wr_en, buf_trig;
+    logic [SCOPE_DW-1:0] buf_wr_data;
+    assign buf_wr_en   = use_cic ? cic_valid : dec_valid;
+    assign buf_wr_data = use_cic ? {1'b0, cic_or, 4'b0000, cic_sample}
+                                 : {dec_is_max, dec_or, 4'b0000, dec_sample};
+    // The delayed pulse is always let through: the buffer ignores a second
+    // trigger, and this way a mode change between a trigger and its delayed
+    // copy cannot lose the trigger and strand the FSM in POST_TRIG.
+    assign buf_trig    = trig_dly | (trig_pulse & ~use_cic);
+
     capture_buffer #(.DEPTH(SAMPLE_DEPTH)) u_buf (
         .wr_clk         (adc_sample_clk),
         .wr_rst_n       (rst_cap_n),
         .start          (fsm_buf_start),
         .abort          (fsm_buf_abort),
         .run            (fsm_run),
-        .wr_en          (dec_valid),
-        .wr_data        ({dec_is_max, dec_or, 4'b0000, dec_sample}),
-        .trig_pulse     (trig_pulse),
+        .wr_en          (buf_wr_en),
+        .wr_data        (buf_wr_data),
+        .trig_pulse     (buf_trig),
         .cfg_pre_count  (cfg_cap.pre_count),
         .cfg_post_count (cfg_cap.post_count),
         .frozen_w       (buf_frozen_w),

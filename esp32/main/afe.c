@@ -50,10 +50,6 @@ static uint8_t s_bo_atten;     // extra input-divider steps (x10 each)
 // relays, SPI and I2C devices.
 static SemaphoreHandle_t s_lock;
 
-// Roughly 0db?
-#define AFE_VGA_UNITY_PREAMP LMH6518_PREAMP_LG
-#define AFE_VGA_UNITY_LADDER 9
-
 // Pin the offset DAC at half scale (VDD/2), ignoring host offset commands
 #define AFE_DAC_FIXED_CODE MCP4726_CODE_MID
 
@@ -128,11 +124,11 @@ static esp_err_t afe_i2c_init(void) {
                       MCP4726_VREF_PIN_BUFFERED, MCP4726_GAIN_1X);
 }
 
-// Requested config with the bring-up pins applied, before any backoff.
+// Requested config with the bring-up pin applied, before any backoff. The
+// preamp and ladder follow the request (GUI or the vertical-scale knob); only
+// the offset DAC is still held at mid-scale.
 static afe_config_t afe_base_locked(void) {
   afe_config_t b = s_req;
-  b.preamp = AFE_VGA_UNITY_PREAMP;
-  b.lmh_atten = AFE_VGA_UNITY_LADDER;
   b.offset_code = AFE_DAC_FIXED_CODE;
   return b;
 }

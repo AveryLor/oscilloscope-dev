@@ -80,3 +80,39 @@ def test_attenuation_scales_volts_per_count():
 
     hg = frame.parse(build_frame(afe_atten=0, afe_flags=frame.AFE_PREAMP_HG, lmh_atten=0))
     assert hg.volts_per_count() < base.volts_per_count()  # more gain, fewer volts/count
+
+
+def test_parses_gain_reduced_and_hires_flags():
+    f = frame.parse(build_frame(flags=frame.FLAG_GAIN_REDUCED | frame.FLAG_HIRES))
+    assert f.gain_reduced is True
+    assert f.hires is True
+    assert f.peak is False
+    assert f.overrange is False
+
+    f = frame.parse(build_frame(flags=frame.FLAG_PEAK | frame.FLAG_OVERRANGE))
+    assert f.gain_reduced is False
+    assert f.hires is False
+
+
+def test_settings_key_changes_only_when_a_setting_does():
+    base = frame.parse(build_frame(seq=1, lmh_atten=4))
+    # A new capture with the same settings: different seq and data, same key.
+    same = frame.parse(build_frame(seq=2, lmh_atten=4, cols=[(1, 2)] * 4,
+                                   flags=frame.FLAG_TRIGGERED))
+    assert same.settings_key() == base.settings_key()
+
+    # Each echoed control setting moves the key (a knob turn shows up here).
+    for change in (
+        {"dec_factor": 7},
+        {"pre_count": 10},
+        {"post_count": 10},
+        {"trig_level": 100},
+        {"afe_atten": 2},
+        {"lmh_atten": 5},
+        {"dac_offset": 100},
+        {"afe_flags": frame.AFE_PREAMP_HG},
+        {"afe_flags": frame.AFE_DC_COUPLED},
+        {"afe_flags": frame.AFE_TERM_50R},
+    ):
+        kwargs = {"lmh_atten": 4, **change}
+        assert frame.parse(build_frame(**kwargs)).settings_key() != base.settings_key(), change

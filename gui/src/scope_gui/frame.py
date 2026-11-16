@@ -108,6 +108,17 @@ class Frame:
     def code_to_volts(self, code: int) -> float:
         return (code - ADC_CODE_MID) * self.volts_per_count()
 
+    def settings_key(self) -> tuple:
+        """Every control setting this frame echoes back, as one comparable
+        value. Two frames with different keys mean a setting changed on the
+        device between them -- from the GUI, a front-panel knob, or the
+        over-range backoff."""
+        return (
+            self.dec_factor, self.pre_count, self.post_count, self.trig_level,
+            self.afe_atten, self.preamp_hg, self.lmh_atten, self.dac_offset,
+            self.dc_coupled, self.term_50r,
+        )
+
     def trig_fraction(self) -> float | None:
         """Trigger position as a fraction of the record, or None if the record
         is empty."""

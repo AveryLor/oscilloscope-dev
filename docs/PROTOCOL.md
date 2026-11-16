@@ -208,3 +208,27 @@ On slow timebases each decimation window emits **two** entries — the window
 minimum then the window maximum — so a narrow glitch inside the window still
 shows up. `SAMPLE_COUNT` then counts min/max entries (twice the number of
 windows) and `is_max` distinguishes them.
+
+## High-res (`MODE.b3`)
+
+Present when `CAPS.b4` is set (`top` built with `HIRES_AVAIL=1`, the default).
+The record is filled by `cic_decimator` instead of `timebase_decimator`: each
+entry is a weighted average of the raw 100 MSPS stream rather than one picked
+sample, so wideband noise drops as the timebase slows.
+
+- Filter: 2-stage CIC (`CIC_STAGES`), decimating by `DEC_FACTOR + 1`. Its
+  impulse response is non-negative, so edges never ring or overshoot.
+- Gain: exactly 1 for every `DEC_FACTOR`, power of two or not. The filter's raw
+  gain of `(DEC_FACTOR + 1)^2` is divided out and rounded to nearest.
+- Entry format is unchanged: a 10-bit code, `is_max = 0`, and `over_range` set
+  if any raw sample in that entry's window clipped. The extra resolution the
+  averaging produces is rounded away; the four spare bits stay 0.
+- `SAMPLE_COUNT` counts one entry per window, as in plain sampling.
+- Start-up: the filter is flushed at every `ARM`, on a `DEC_FACTOR` change and
+  when the mode is selected, and its first two outputs are dropped. A record
+  never contains a partly-filled window.
+- Trigger position: the trigger marker is delayed by the filter's pipeline
+  latency, so `TRIG_PTR` lines up as in plain sampling. What remains is the
+  filter's own group delay, about one entry.
+- `DEC_FACTOR = 0` is a pass-through (same data as plain sampling).
+- If `MODE.b2` (peak) and `MODE.b3` are both written, peak wins.

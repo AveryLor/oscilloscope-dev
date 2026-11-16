@@ -23,7 +23,14 @@ typedef enum {
     CMD_SET_VERTICAL,
     CMD_SET_COUPLING,
     CMD_SET_TERM,
+    CMD_SET_ACQ,
 } cmd_kind_t;
+
+/* SET_ACQ values: which decimator fills the record. Same cycle as the
+ * horizontal-scale knob's button. */
+#define CMD_ACQ_SAMPLED 0u
+#define CMD_ACQ_PEAK    1u
+#define CMD_ACQ_HIRES   2u
 
 typedef struct {
     cmd_kind_t kind;
@@ -53,6 +60,9 @@ typedef struct {
         struct {
             bool term_50r;
         } term;
+        struct {
+            uint8_t mode; // CMD_ACQ_SAMPLED / _PEAK / _HIRES
+        } acq;
     } as;
 } cmd_t;
 

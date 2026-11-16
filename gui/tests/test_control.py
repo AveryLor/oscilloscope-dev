@@ -1,4 +1,4 @@
-"""Table-driven checks that the six SET_* formatters produce exactly the wire
+"""Table-driven checks that the seven SET_* formatters produce exactly the wire
 grammar esp32/main/cmd_parse.c expects (docs/CONTROL.md), and reject anything
 outside the range the firmware accepts. See esp32/test/test_cmd_parse.c for
 the matching decode-side tests."""
@@ -70,3 +70,17 @@ def test_fmt_set_coupling():
 def test_fmt_set_term():
     assert control.fmt_set_term(True) == "SET_TERM 1"
     assert control.fmt_set_term(False) == "SET_TERM 0"
+
+
+@pytest.mark.parametrize(
+    "mode,expected",
+    [(control.ACQ_SAMPLED, "SET_ACQ 0"), (control.ACQ_PEAK, "SET_ACQ 1"), (control.ACQ_HIRES, "SET_ACQ 2")],
+)
+def test_fmt_set_acq(mode, expected):
+    assert control.fmt_set_acq(mode) == expected
+
+
+@pytest.mark.parametrize("mode", [-1, 3])
+def test_fmt_set_acq_rejects_out_of_range(mode):
+    with pytest.raises(ValueError):
+        control.fmt_set_acq(mode)
