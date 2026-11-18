@@ -34,10 +34,10 @@ flowchart LR
 | **GUI**   | Draws the trace, graticule and readout from the streamed captures; sends dial/toggle control commands back to the ESP32 |
 
 ## No Filtering
-https://github.com/user-attachments/assets/80b57bfa-fd00-401d-9024-c167e65d5cbb
+https://github.com/user-attachments/assets/7fa53f13-ae15-4845-b9df-d69107c39167
 
 ### CIC Filtering
-https://github.com/user-attachments/assets/7fa53f13-ae15-4845-b9df-d69107c39167
+https://github.com/user-attachments/assets/80b57bfa-fd00-401d-9024-c167e65d5cbb
 
 ## PCB View
 
