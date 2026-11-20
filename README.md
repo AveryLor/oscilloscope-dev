@@ -2,6 +2,12 @@
 
 FPGA + ESP32 firmware for an oscilloscope: the Tang Nano 20K buffers ADC samples; an ESP32 streams them to a laptop for display.
 
+
+## Contributors
+
+- Electronics design, layout, DSP and manufacturing were done by Eric Lyu 
+- Firmware, RTL and Scope GUI were done by Avery Lor
+
 ## Hardware
 
 - Sipeed Tang Nano 20K (GW2AR-18C) — [datasheet](https://dl.sipeed.com/shareURL/TANG/Nano_20K/1_Datasheet)
